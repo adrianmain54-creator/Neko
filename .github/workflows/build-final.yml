@@ -1,0 +1,61 @@
+name: Build Neko Final
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Theos & SDK
+      uses: Randomblock1/theos-action@v1
+      with:
+        theos-dir: 'theos'
+        theos-src: 'https://github.com/theos/theos'
+        theos-sdks: 'https://github.com/theos/sdks'
+        theos-sdks-branch: 'master'
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build clang
+
+    - name: Build Luau for iOS
+      run: |
+        git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
+        cd vendor/luau-src
+        
+        curl -L -o ios.toolchain.cmake https://raw.githubusercontent.com/leetal/ios-cmake/master/ios.toolchain.cmake
+        
+        cmake -B build -G Ninja \
+          -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake \
+          -DPLATFORM=OS64 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLUAU_BUILD_TESTS=OFF
+        
+        cmake --build build
+        
+        mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
+        cp build/Luau.VM.a build/Luau.Compiler.a ../../vendor/luau/lib/
+        cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/
+
+    - name: Build Neko Tweak
+      run: |
+        export THEOS=$GITHUB_WORKSPACE/theos
+        export PATH=$THEOS/bin:$PATH
+        make clean
+        make
+
+    - name: Extract and Upload Dylib
+      run: |
+        find .theos -name "neko.dylib" -exec cp {} ./neko.dylib \;
+        ls -la neko.dylib
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: neko-dylib-final
+        path: neko.dylib
