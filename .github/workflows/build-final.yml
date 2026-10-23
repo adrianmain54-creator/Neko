@@ -45,13 +45,13 @@ jobs:
           
           mkdir -p build_vm
           for f in VM/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -include stddef.h -c "$f" -o "build_vm/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -include stddef.h -c "$f" -o "build_compiler/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
@@ -64,21 +64,17 @@ jobs:
           export THEOS=$GITHUB_WORKSPACE/theos
           export PATH=$THEOS/bin:$PATH
           
-          # Point to the iOS SDK and C++ headers so Theos doesn't get confused
           SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          export CFLAGS="-isysroot $SDK_PATH"
-          export CXXFLAGS="-isysroot $SDK_PATH -I$SDK_PATH/usr/include/c++/v1 -std=c++17 -stdlib=libc++"
+          
+          # Force stddef.h globally for Theos Makefile
+          export CFLAGS="-isysroot $SDK_PATH -include stddef.h"
+          export CXXFLAGS="-isysroot $SDK_PATH -I$SDK_PATH/usr/include/c++/v1 -std=c++17 -stdlib=libc++ -include stddef.h"
           
           make clean
           make
-          
-      - name: Extract and Upload Dylib
-        run: |
-          find .theos -name "neko.dylib" -exec cp {} ./neko.dylib \;
-          ls -la neko.dylib
           
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: neko-dylib-final
-          path: neko.dylib
+          path: .theos/obj/debug/neko.dylib
