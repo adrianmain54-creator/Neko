@@ -1,75 +1,74 @@
-name: Build Neko Linux
-
+name: Build Neko Final
 on: [push, workflow_dispatch]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
-
-    - name: Install Theos
-      run: |
-        git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-        echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
-
-    - name: Download iOS SDK
-      run: |
-        rm -rf $GITHUB_WORKSPACE/theos/sdks
-        git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
-
-    - name: Compile Luau for iOS manually
-      run: |
-        git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
-        cd vendor/luau-src
-        
-        mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
-        
-        # Grab the newest iOS SDK
-        SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-        echo "Using SDK: $SDK_PATH"
-        
-        # Compile Luau VM
-        mkdir -p build_vm
-        for f in VM/src/*.cpp; do
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
-        done
-        ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
-
-        # Compile Luau Compiler (Now with -ICommon/include!)
-        mkdir -p build_compiler
-        for f in Compiler/src/*.cpp; do
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
-        done
-        ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
-
-        # Copy headers for Theos
-        mkdir -p ../../vendor/luau/include/Luau
-        cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/
-        cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/Luau/
-
-    - name: Build Neko Tweak
-      run: |
-        export THEOS=$GITHUB_WORKSPACE/theos
-        export PATH=$THEOS/bin:$PATH
-        make clean
-        make
-
-    - name: Extract and Upload Dylib
-      run: |
-        find .theos -name "neko.dylib" -exec cp {} ./neko.dylib \;
-        ls -la neko.dylib
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: neko-dylib-final
-        path: neko.dylib
+      - uses: actions/checkout@v4
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make git curl clang libplist-dev fakeroot libssl-dev libtinfo6
+          
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+          echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
+          
+      - name: Download iOS SDK
+        run: |
+          rm -rf $GITHUB_WORKSPACE/theos/sdks
+          git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
+          
+      - name: Compile Luau
+        run: |
+          git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
+          cd vendor/luau-src
+          mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
+          
+          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          echo "Using SDK: $SDK_PATH"
+          
+          # FLATTEN ALL HEADERS INTO ONE FOLDER
+          mkdir -p all_includes
+          cp -r VM/include/* all_includes/
+          cp -r Ast/include/* all_includes/
+          cp -r Common/include/* all_includes/
+          cp -r Compiler/include/* all_includes/
+          
+          # Compile VM
+          mkdir -p build_vm
+          for f in VM/src/*.cpp; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iall_includes -c "$f" -o "build_vm/$(basename $f).o"
+          done
+          ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
+          
+          # Compile Compiler
+          mkdir -p build_compiler
+          for f in Compiler/src/*.cpp; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iall_includes -c "$f" -o "build_compiler/$(basename $f).o"
+          done
+          ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
+          
+          # Copy headers for Theos
+          cp -r all_includes/* ../../vendor/luau/include/
+          
+      - name: Build Neko Tweak
+        run: |
+          export THEOS=$GITHUB_WORKSPACE/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          make
+          
+      - name: Extract and Upload Dylib
+        run: |
+          find .theos -name "neko.dylib" -exec cp {} ./neko.dylib \;
+          ls -la neko.dylib
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neko-dylib-final
+          path: neko.dylib
