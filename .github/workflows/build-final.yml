@@ -26,36 +26,35 @@ jobs:
         rm -rf $GITHUB_WORKSPACE/theos/sdks
         git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
 
-    - name: Compile Luau for iOS manually (bypassing CMake)
+    - name: Compile Luau for iOS manually
       run: |
         git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
         cd vendor/luau-src
         
         mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
         
-        # Grab the NEWEST SDK, not the oldest one
+        # Grab the newest iOS SDK
         SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
         echo "Using SDK: $SDK_PATH"
         
-        # Point to the modern C++ headers inside the SDK
-        CXX_INCLUDES="-I$SDK_PATH/usr/include/c++/v1"
-        
-        # Compile Luau VM
+        # Compile Luau VM with C++17 and Apple's libc++
         mkdir -p build_vm
         for f in VM/src/*.cpp; do
-          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include $CXX_INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
 
         # Compile Luau Compiler
         mkdir -p build_compiler
         for f in Compiler/src/*.cpp; do
-          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include $CXX_INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
 
-        # Copy headers
+        # Copy headers for Theos
+        mkdir -p ../../vendor/luau/include/Luau
         cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/
+        cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/Luau/
 
     - name: Build Neko Tweak
       run: |
