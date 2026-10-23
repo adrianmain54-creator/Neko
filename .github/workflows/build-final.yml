@@ -11,11 +11,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make git curl clang libplist-dev fakeroot libssl-dev libtinfo6
           
+      - name: Install Ldid
+        run: |
+          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
+          sudo mv ldid_linux_x86_64 /usr/local/bin/ldid
+          sudo chmod +x /usr/local/bin/ldid
+          
       - name: Install Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
           echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
           echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
+          
+      - name: Fix Theos Toolchain
+        run: |
+          # Symlink the system clang so Theos thinks its toolchain is installed
+          mkdir -p $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin
+          ln -sf $(which clang++) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
+          ln -sf $(which clang) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang
           
       - name: Download iOS SDK
         run: |
@@ -29,27 +42,20 @@ jobs:
           mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          echo "Using SDK: $SDK_PATH"
-          
-          # Automatically find every include folder in the repo and add -I to it
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
-          echo "Using Includes: $INCLUDES"
           
-          # Compile VM
           mkdir -p build_vm
           for f in VM/src/*.cpp; do
             clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
-          # Compile Compiler
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
             clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
-          # Copy all headers for Theos
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
