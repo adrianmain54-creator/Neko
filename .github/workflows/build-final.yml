@@ -15,17 +15,16 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
 
-    # Manually install Theos instead of using the buggy action
     - name: Install Theos
       run: |
-        git clone --recursive https://github.com/theos/theos.git $HOME/theos
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-        echo "$HOME/theos/bin" >> $GITHUB_PATH
+        git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+        echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
 
     - name: Download iOS SDK
       run: |
-        # Clone the SDK repo instead of using a broken zip download
-        git clone --depth 1 https://github.com/theos/sdks.git $HOME/theos/sdks
+        rm -rf $GITHUB_WORKSPACE/theos/sdks
+        git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
 
     - name: Build Luau for iOS
       run: |
