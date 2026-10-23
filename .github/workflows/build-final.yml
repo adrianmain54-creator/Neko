@@ -1,43 +1,62 @@
-name: Build Neko Final
+name: Build Neko Linux
 
 on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: ubuntu-latest
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Install Theos & SDK
+    - name: Install Dependencies
       run: |
-        git clone --recursive https://github.com/theos/theos.git $HOME/theos
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-        echo "$HOME/theos/bin" >> $GITHUB_PATH
-        $HOME/theos/bin/theos-sdk install --with-ios-sdk 16.5
+        sudo apt-get update
+        sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
 
-    - name: Build Luau for iOS
+    - name: Install Theos
+      run: |
+        git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+        echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
+
+    - name: Download iOS SDK
+      run: |
+        rm -rf $GITHUB_WORKSPACE/theos/sdks
+        git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
+
+    - name: Compile Luau for iOS manually (bypassing CMake)
       run: |
         git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
         cd vendor/luau-src
+        
         mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
         
-        # Native macOS CMake cross-compilation for iOS. No external toolchain needed.
-        cmake -B build \
-          -DCMAKE_SYSTEM_NAME=iOS \
-          -DCMAKE_OSX_ARCHITECTURES="arm64;arm64e" \
-          -DCMAKE_OSX_SYSROOT=iphoneos \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DLUAU_BUILD_TESTS=OFF
-          
-        cmake --build build -j --target Luau.VM Luau.Compiler
+        # Find the exact SDK path
+        SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | head -n 1)
+        echo "Using SDK: $SDK_PATH"
         
-        cp build/Luau.VM.a build/Luau.Compiler.a ../../vendor/luau/lib/
+        # Compile Luau VM
+        mkdir -p build_vm
+        for f in VM/src/*.cpp; do
+          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
+        done
+        ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
+
+        # Compile Luau Compiler
+        mkdir -p build_compiler
+        for f in Compiler/src/*.cpp; do
+          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
+        done
+        ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
+
+        # Copy headers
         cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/
 
     - name: Build Neko Tweak
       run: |
-        export THEOS=$HOME/theos
+        export THEOS=$GITHUB_WORKSPACE/theos
         export PATH=$THEOS/bin:$PATH
         make clean
         make
