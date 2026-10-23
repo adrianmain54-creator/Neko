@@ -33,21 +33,24 @@ jobs:
         
         mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
         
-        # Find the exact SDK path
-        SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | head -n 1)
+        # Grab the NEWEST SDK, not the oldest one
+        SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
         echo "Using SDK: $SDK_PATH"
+        
+        # Point to the modern C++ headers inside the SDK
+        CXX_INCLUDES="-I$SDK_PATH/usr/include/c++/v1"
         
         # Compile Luau VM
         mkdir -p build_vm
         for f in VM/src/*.cpp; do
-          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
+          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include $CXX_INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
 
         # Compile Luau Compiler
         mkdir -p build_compiler
         for f in Compiler/src/*.cpp; do
-          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
+          clang++ -isysroot $SDK_PATH -target arm64-apple-ios15.0 -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include $CXX_INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
 
