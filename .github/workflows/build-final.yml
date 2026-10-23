@@ -4,50 +4,40 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
+    runs-on: macos-13
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Install Dependencies
+    - name: Install Theos & SDK
       run: |
-        sudo apt-get update
-        sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
-
-    - name: Install Theos
-      run: |
-        git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-        echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
-
-    - name: Download iOS SDK
-      run: |
-        rm -rf $GITHUB_WORKSPACE/theos/sdks
-        git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
+        git clone --recursive https://github.com/theos/theos.git $HOME/theos
+        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+        echo "$HOME/theos/bin" >> $GITHUB_PATH
+        $HOME/theos/bin/theos-sdk install --with-ios-sdk 16.5
 
     - name: Build Luau for iOS
       run: |
         git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
         cd vendor/luau-src
+        mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
         
-        curl -L -o ios.toolchain.cmake https://raw.githubusercontent.com/leetal/ios-cmake/master/ios.toolchain.cmake
-        
-        cmake -B build -G Ninja \
-          -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake \
-          -DPLATFORM=OS64 \
+        # Native macOS CMake cross-compilation for iOS. No external toolchain needed.
+        cmake -B build \
+          -DCMAKE_SYSTEM_NAME=iOS \
+          -DCMAKE_OSX_ARCHITECTURES="arm64;arm64e" \
+          -DCMAKE_OSX_SYSROOT=iphoneos \
           -DCMAKE_BUILD_TYPE=Release \
           -DLUAU_BUILD_TESTS=OFF
+          
+        cmake --build build -j --target Luau.VM Luau.Compiler
         
-        cmake --build build
-        
-        mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
         cp build/Luau.VM.a build/Luau.Compiler.a ../../vendor/luau/lib/
         cp VM/include/*.h Compiler/include/*.h ../../vendor/luau/include/
 
     - name: Build Neko Tweak
       run: |
-        export THEOS=$GITHUB_WORKSPACE/theos
+        export THEOS=$HOME/theos
         export PATH=$THEOS/bin:$PATH
         make clean
         make
