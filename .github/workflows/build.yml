@@ -2,20 +2,27 @@ name: Build Neko
 on: [push, workflow_dispatch]
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Theos and Dependencies
+      - name: Install Dependencies
         run: |
-          brew install ldid dpkg make cmake
+          sudo apt-get update
+          sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev ldid
+
+      - name: Install Theos
+        run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
           echo "$HOME/theos/bin" >> $GITHUB_PATH
 
       - name: Download iOS SDK
         run: |
-          $HOME/theos/bin/theos-sdk install --with-ios-sdk 16.5
+          curl -LO https://github.com/theos/sdks/archive/master.zip
+          unzip master.zip
+          mkdir -p $HOME/theos/sdks/
+          mv sdks-master/*.sdk $HOME/theos/sdks/
 
       - name: Download & Build Luau for iOS
         run: |
