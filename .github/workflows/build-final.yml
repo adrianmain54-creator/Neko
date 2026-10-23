@@ -37,17 +37,17 @@ jobs:
         SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
         echo "Using SDK: $SDK_PATH"
         
-        # Compile Luau VM with C++17 and Apple's libc++
+        # Compile Luau VM (Exceptions enabled)
         mkdir -p build_vm
         for f in VM/src/*.cpp; do
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_vm/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
 
         # Compile Luau Compiler
         mkdir -p build_compiler
         for f in Compiler/src/*.cpp; do
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -fno-exceptions -fno-rtti -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 -Iinclude -IVM/include -IAst/include -ICommon/include -ICompiler/include -c "$f" -o "build_compiler/$(basename $f).o"
         done
         ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
 
