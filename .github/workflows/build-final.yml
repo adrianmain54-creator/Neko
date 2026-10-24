@@ -67,11 +67,11 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # ADDED -fuse-ld=lld here to use the Apple-compatible linker
+          # Notice the change here: passing the exact .a file paths instead of -l flags
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
-            -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
+            vendor/luau/lib/Luau.VM.a vendor/luau/lib/Luau.Compiler.a \
             -o neko.dylib
 
           zip neko-dylib-final.zip neko.dylib
