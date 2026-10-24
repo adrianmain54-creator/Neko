@@ -13,12 +13,8 @@ struct Closure {
     union { struct { void* p; void* execdata; } l; struct { lua_CFunction f; void* cont; } c; };
 };
 
-// --- ANTI-KICK: Remote Throttler ---
-// Stops scripts from spamming FireServer and getting you kicked
-static double last_fire_time = 0;
-
 void neko_install_hooks(lua_State* L) {
-    // We leave this empty for now to prevent iOS 27 crashes before LiveContainer
+    // Empty for now to prevent iOS 27 crashes before LiveContainer
 }
 
 static int l_HttpGet(lua_State* L) {
@@ -50,10 +46,9 @@ static int l_getgenv(lua_State* L) {
 static int l_loadstring(lua_State* L) {
     size_t len = 0; const char* src = luaL_checklstring(L, 1, &len);
     if (luau_load(L, "=neko", src, len, 0) != 0) { 
-        // Catch syntax errors without crashing
         const char* err = lua_tostring(L, -1);
         lua_pushstring(L, err);
-        return 1; // Return error message instead of throwing
+        return 1;
     }
     return 1;
 }
