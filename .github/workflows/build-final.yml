@@ -15,16 +15,15 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile All Luau Modules
+      - name: Compile All Luau Modules (VM, Compiler, Ast, Common, Analysis)
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
-          mkdir -p ../../vendor/luau/include
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Compile every single module to prevent missing symbols
+          # Compile every single .cpp file in every module
           for module in VM Compiler Ast Common Analysis; do
             mkdir -p "build_$module"
             for f in $module/src/*.cpp; do
@@ -32,11 +31,25 @@ jobs:
             done
           done
           
+          # Ensure headers are copied for the tweak
           for d in $(find . -type d -name "include"); do
+            mkdir -p ../../vendor/luau/include
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Compile Tweak Directly
+      - name: Create Explicit Flag Definition
+        run: |
+          # This guarantees the missing symbol is defined
+          cat << 'EOF' > vendor/luau-src/Flags.cpp
+          #include "Luau/Common.h"
+          LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
+          EOF
+          
+          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          INCLUDES=$(find vendor/luau-src -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c vendor/luau-src/Flags.cpp -o vendor/luau-src/Flags.o
+
+      - name: Compile Tweak and Link Everything
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
@@ -48,12 +61,14 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link ALL object files from every module
-          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
+          # Collect EVERY object file, including the new Flags.o
+          LUAU_OBJS=$(find vendor/luau-src -name "*.o" | tr '\n' ' ')
+          
+          # Link with -Wl,-all_load to force inclusion of all symbols
+          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
+            -Wl,-all_load \
             -framework Foundation -framework UIKit \
-            Api.o Tweak.o \
-            vendor/luau-src/build_VM/*.o vendor/luau-src/build_Compiler/*.o \
-            vendor/luau-src/build_Ast/*.o vendor/luau-src/build_Common/*.o vendor/luau-src/build_Analysis/*.o \
+            Api.o Tweak.o $LUAU_OBJS \
             -o neko.dylib
 
       - name: Sign Dylib
