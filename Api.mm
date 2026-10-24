@@ -63,7 +63,7 @@ static int l_getgenv(lua_State* L) {
 
 static int l_loadstring(lua_State* L) {
     size_t len = 0; const char* src = luaL_checklstring(L, 1, &len);
-    if (luau_load(L, "=neko", src, len, 0) != 0) return lua_error(L);
+    if (luau_load(L, "=neko", src, len, 0) != 0) { lua_error(L); return 0; }
     return 1;
 }
 
@@ -87,7 +87,7 @@ static int l_hookfunction(lua_State* L) {
     lua_CFunction original = target->c.f;
     target->c.f = hook->c.f;
     target->c.cont = hook->c.cont;
-    lua_pushcfunction(L, original);
+    lua_pushcfunction(L, original, "original");
     return 1;
 }
 
@@ -95,25 +95,25 @@ static int l_setclipboard(lua_State* L) { const char* str = luaL_checkstring(L, 
 static int l_stub(lua_State* L) { lua_newtable(L); return 1; }
 
 void neko_register_api(lua_State* L) {
-    lua_pushcfunction(L, l_getgenv); lua_setglobal(L, "getgenv");
-    lua_pushcfunction(L, l_loadstring); lua_setglobal(L, "loadstring");
-    lua_pushcfunction(L, l_loadstring); lua_setglobal(L, "require");
-    lua_pushcfunction(L, l_identify); lua_setglobal(L, "identifyexecutor");
-    lua_pushcfunction(L, l_getnamecallmethod); lua_setglobal(L, "getnamecallmethod");
-    lua_pushcfunction(L, l_hookfunction); lua_setglobal(L, "hookfunction");
-    lua_pushcfunction(L, l_getrawmetatable); lua_setglobal(L, "getrawmetatable");
-    lua_pushcfunction(L, l_setreadonly); lua_setglobal(L, "setreadonly");
-    lua_pushcfunction(L, l_isreadonly); lua_setglobal(L, "isreadonly");
-    lua_pushcfunction(L, l_checkcaller); lua_setglobal(L, "checkcaller");
-    lua_pushcfunction(L, l_setclipboard); lua_setglobal(L, "setclipboard");
+    lua_pushcfunction(L, l_getgenv, "getgenv"); lua_setglobal(L, "getgenv");
+    lua_pushcfunction(L, l_loadstring, "loadstring"); lua_setglobal(L, "loadstring");
+    lua_pushcfunction(L, l_loadstring, "require"); lua_setglobal(L, "require");
+    lua_pushcfunction(L, l_identify, "identifyexecutor"); lua_setglobal(L, "identifyexecutor");
+    lua_pushcfunction(L, l_getnamecallmethod, "getnamecallmethod"); lua_setglobal(L, "getnamecallmethod");
+    lua_pushcfunction(L, l_hookfunction, "hookfunction"); lua_setglobal(L, "hookfunction");
+    lua_pushcfunction(L, l_getrawmetatable, "getrawmetatable"); lua_setglobal(L, "getrawmetatable");
+    lua_pushcfunction(L, l_setreadonly, "setreadonly"); lua_setglobal(L, "setreadonly");
+    lua_pushcfunction(L, l_isreadonly, "isreadonly"); lua_setglobal(L, "isreadonly");
+    lua_pushcfunction(L, l_checkcaller, "checkcaller"); lua_setglobal(L, "checkcaller");
+    lua_pushcfunction(L, l_setclipboard, "setclipboard"); lua_setglobal(L, "setclipboard");
     
-    lua_pushcfunction(L, l_stub); lua_setglobal(L, "getgc");
-    lua_pushcfunction(L, l_stub); lua_setglobal(L, "getconnections");
-    lua_pushcfunction(L, l_stub); lua_setglobal(L, "Drawing");
+    lua_pushcfunction(L, l_stub, "getgc"); lua_setglobal(L, "getgc");
+    lua_pushcfunction(L, l_stub, "getconnections"); lua_setglobal(L, "getconnections");
+    lua_pushcfunction(L, l_stub, "Drawing"); lua_setglobal(L, "Drawing");
 
     lua_getglobal(L, "game");
     if (lua_getmetatable(L, -1)) {
-        lua_pushcfunction(L, l_HttpGet); lua_setfield(L, -2, "HttpGet");
+        lua_pushcfunction(L, l_HttpGet, "HttpGet"); lua_setfield(L, -2, "HttpGet");
         lua_pop(L, 1);
     }
     lua_pop(L, 1);
