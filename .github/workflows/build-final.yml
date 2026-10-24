@@ -13,7 +13,6 @@ jobs:
           
       - name: Download SDK and Substrate
         run: |
-          # We only need the SDKs and the Substrate framework, not the whole Theos makefile system
           git clone --depth 1 https://github.com/theos/sdks.git sdks
           git clone --depth 1 https://github.com/theos/lib.git theos_lib
 
@@ -46,17 +45,19 @@ jobs:
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          # Rename Tweak.xm to Tweak.mm (since there are no Logos macros, it's pure Obj-C++)
+          # 1. Create a dummy lauxlib.h because Luau doesn't have it, but Neko.h includes it
+          touch vendor/luau/include/lauxlib.h
+          
+          # 2. Rename Tweak.xm to Tweak.mm
           mv Tweak.xm Tweak.mm
           
-          # These flags disable the broken C++ modules and define the missing ptrdiff_t
           FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include"
           
-          # Compile the two files
+          # 3. Compile
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link them into the final dylib
+          # 4. Link
           clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
@@ -64,7 +65,7 @@ jobs:
             -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
             -o neko.dylib
             
-          # Zip it for download
+          # 5. Zip
           zip neko-dylib-final.zip neko.dylib
 
       - name: Upload Artifact
