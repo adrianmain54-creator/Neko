@@ -34,7 +34,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
-          mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
+          mkdir -p ../../vendor/luau/include
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
@@ -43,13 +43,11 @@ jobs:
           for f in VM/src/*.cpp; do
             clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
           done
-          ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
             clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
           done
-          ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
@@ -67,11 +65,11 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Notice the change here: passing the exact .a file paths instead of -l flags
+          # Linking all .o files directly, bypassing the .a archives entirely
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
-            vendor/luau/lib/Luau.VM.a vendor/luau/lib/Luau.Compiler.a \
+            vendor/luau-src/build_vm/*.o vendor/luau-src/build_compiler/*.o \
             -o neko.dylib
 
           zip neko-dylib-final.zip neko.dylib
