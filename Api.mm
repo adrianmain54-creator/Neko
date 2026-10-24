@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #include "Neko.h"
 #include <dlfcn.h>
-#include <CydiaSubstrate.h> // <--- THIS LINE CHANGED
+#include <substrate.h>
 #include <string.h>
 
 static lua_State* g_L = nullptr;
