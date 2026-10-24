@@ -14,7 +14,8 @@ jobs:
       - name: Download SDK and Theos
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
-          git clone --depth 1 https://github.com/theos/theos.git theos
+          # Download the substrate header directly to avoid submodule issues
+          curl -L https://raw.githubusercontent.com/theos/headers/master/substrate.h -o substrate.h
 
       - name: Compile Luau
         run: |
@@ -48,8 +49,8 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          # Pointing to the exact Theos vendor folder that has substrate.h
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos/vendor/include"
+          # Added -I. so it looks in the root directory for substrate.h
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
@@ -58,7 +59,6 @@ jobs:
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
             -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
-            -F$GITHUB_WORKSPACE/theos/vendor/lib -framework CydiaSubstrate \
             -o neko.dylib
 
           zip neko-dylib-final.zip neko.dylib
