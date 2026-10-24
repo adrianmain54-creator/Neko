@@ -15,6 +15,8 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
           git clone --depth 1 https://github.com/theos/lib.git theos_lib
+          # COPY THE HEADER DIRECTLY TO THE ROOT FOLDER
+          cp -r $GITHUB_WORKSPACE/theos_lib/lib/CydiaSubstrate.framework/Headers/* .
 
       - name: Compile Luau
         run: |
@@ -48,7 +50,8 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/lib/CydiaSubstrate.framework/Headers"
+          # -I. tells the compiler to look in the main folder where we just put substrate.h
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
