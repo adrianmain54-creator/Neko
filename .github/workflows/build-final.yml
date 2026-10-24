@@ -9,7 +9,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
+          sudo apt-get install -y make git curl clang lld cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
 
       - name: Download SDK
         run: |
@@ -62,14 +62,13 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          # -I. tells the compiler to look in the main folder for the substrate.h we just created
           FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # -undefined dynamic_lookup tells the linker not to worry about missing MSHookFunction
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
+          # ADDED -fuse-ld=lld here to use the Apple-compatible linker
+          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
             -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
