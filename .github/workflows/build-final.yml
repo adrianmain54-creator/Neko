@@ -23,11 +23,11 @@ jobs:
           echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
           echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
           
-      - name: Fix Theos Toolchain
+      - name: Download Apple Clang Toolchain
         run: |
-          mkdir -p $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin
-          ln -sf $(which clang++) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
-          ln -sf $(which clang) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang
+          # Download the official Theos Linux Toolchain (Contains Apple's Clang)
+          curl -LO https://github.com/theos/toolchain/releases/download/linux-2.0/linux-toolchain.tar.gz
+          tar -xzf linux-toolchain.tar.gz -C $GITHUB_WORKSPACE/theos
           
       - name: Download iOS SDK
         run: |
@@ -43,15 +43,18 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
+          # Use the newly downloaded Apple Clang
+          CLANG=$GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
+          
           mkdir -p build_vm
           for f in VM/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -fno-modules -c "$f" -o "build_vm/$(basename $f).o"
+            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -fno-modules -c "$f" -o "build_compiler/$(basename $f).o"
+            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
@@ -63,13 +66,6 @@ jobs:
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
           export PATH=$THEOS/bin:$PATH
-          
-          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          
-          # Force modules off and clear the broken macro
-          export CFLAGS="-isysroot $SDK_PATH -fno-modules"
-          export CXXFLAGS="-isysroot $SDK_PATH -I$SDK_PATH/usr/include/c++/v1 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS="
-          
           make clean
           make
           
