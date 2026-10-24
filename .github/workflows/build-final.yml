@@ -1,31 +1,21 @@
-name: Build Neko Final
+name: Build Neko Pure
 on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
-
-      - name: Install Theos and SDKs
+          sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
+          
+      - name: Download SDK and Substrate
         run: |
-          # 1. Clone Theos
-          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
-
-          # 2. Symlink the Linux compiler so Theos stops looking for the missing 500MB toolchain
-          mkdir -p $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin
-          ln -sf $(which clang++) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
-          ln -sf $(which clang) $GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang
-
-          # 3. Delete the empty sdks folder and download real SDKs
-          rm -rf $GITHUB_WORKSPACE/theos/sdks
-          git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
+          # We only need the SDKs and the Substrate framework, not the whole Theos makefile system
+          git clone --depth 1 https://github.com/theos/sdks.git sdks
+          git clone --depth 1 https://github.com/theos/lib.git theos_lib
 
       - name: Compile Luau
         run: |
@@ -33,7 +23,7 @@ jobs:
           cd vendor/luau-src
           mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
           
-          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
           mkdir -p build_vm
@@ -52,22 +42,33 @@ jobs:
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Build Neko Tweak
+      - name: Compile Tweak Directly (Bypass Theos)
         run: |
-          export THEOS=$GITHUB_WORKSPACE/theos
-          export PATH=$THEOS/bin:$PATH
+          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          # Rename Tweak.xm to Tweak.mm (since there are no Logos macros, it's pure Obj-C++)
+          mv Tweak.xm Tweak.mm
           
-          # These flags bypass the C++ module errors and fix the ptrdiff_t error
-          export CFLAGS="-isysroot $SDK_PATH -fno-modules"
-          export CXXFLAGS="-isysroot $SDK_PATH -I$SDK_PATH/usr/include/c++/v1 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS="
+          # These flags disable the broken C++ modules and define the missing ptrdiff_t
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include"
           
-          make clean
-          make
+          # Compile the two files
+          clang++ $FLAGS -c Tweak.mm -o Tweak.o
+          clang++ $FLAGS -c Api.mm -o Api.o
+          
+          # Link them into the final dylib
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
+            -framework Foundation -framework UIKit \
+            Api.o Tweak.o \
+            -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
+            -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
+            -o neko.dylib
+            
+          # Zip it for download
+          zip neko-dylib-final.zip neko.dylib
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: neko-dylib-final
-          path: .theos/obj/debug/neko.dylib
+          path: neko-dylib-final.zip
