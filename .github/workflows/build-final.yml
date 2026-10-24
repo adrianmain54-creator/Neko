@@ -9,19 +9,22 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
+          sudo apt-get install -y make git curl cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
 
-      - name: Install Theos and SDKs
+      - name: Install Theos, Toolchain, and SDKs
         run: |
           # 1. Clone Theos
           git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
           echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
           echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
 
-          # 2. Delete the empty sdks folder that Theos comes with
-          rm -rf $GITHUB_WORKSPACE/theos/sdks
+          # 2. Download and extract the Apple Toolchain (This fixes the error!)
+          curl -LO https://github.com/theos/toolchain/releases/download/linux-2.0/linux-toolchain.tar.gz
+          tar -xzf linux-toolchain.tar.gz -C $GITHUB_WORKSPACE/theos
+          rm linux-toolchain.tar.gz
 
-          # 3. Clone the SDKs cleanly
+          # 3. Clean out the empty sdks folder and download the real SDKs
+          rm -rf $GITHUB_WORKSPACE/theos/sdks
           git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
 
       - name: Compile Luau
@@ -33,15 +36,18 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
+          # Use the Apple clang we just downloaded
+          CLANG=$GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
+          
           mkdir -p build_vm
           for f in VM/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
+            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
+            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
@@ -53,13 +59,6 @@ jobs:
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
           export PATH=$THEOS/bin:$PATH
-          
-          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          
-          # These flags fix the ptrdiff_t error you saw earlier
-          export CFLAGS="-isysroot $SDK_PATH -fno-modules"
-          export CXXFLAGS="-isysroot $SDK_PATH -I$SDK_PATH/usr/include/c++/v1 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS="
-          
           make clean
           make
 
