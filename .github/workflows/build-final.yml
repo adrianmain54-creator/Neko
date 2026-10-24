@@ -11,11 +11,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
 
-      - name: Download SDK and Theos
+      - name: Download SDK and Substrate Headers
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
-          # Download the substrate header directly to avoid submodule issues
-          curl -L https://raw.githubusercontent.com/theos/headers/master/substrate.h -o substrate.h
+          git clone --depth 1 https://github.com/theos/headers.git theos_headers
 
       - name: Compile Luau
         run: |
@@ -49,8 +48,7 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          # Added -I. so it looks in the root directory for substrate.h
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_headers/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
