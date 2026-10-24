@@ -4,12 +4,10 @@
 #include "Neko.h"
 #include <dlfcn.h>
 
-// --- THEME ENGINE ---
 static UIColor *g_themeColor;
 static int g_themeIndex = 0;
 static NSArray *g_themeColors;
 
-// --- UI COLORS ---
 #define UI_BG_COLOR [UIColor colorWithRed:0.08 green:0.06 blue:0.12 alpha:0.85]
 #define UI_SIDEBAR_COLOR [UIColor colorWithRed:0.12 green:0.10 blue:0.18 alpha:0.9]
 #define UI_PANEL_COLOR [UIColor colorWithRed:0.15 green:0.13 blue:0.22 alpha:0.8]
@@ -48,9 +46,11 @@ int ExecuteScript(const char* code) {
 
 @implementation NekoUI
 
-- (instancetype)init {
-    self = [super initWithFrame:CGRectMake(30, 100, 700, 480)];
+// Use initWithWindowScene for iOS 27
+- (instancetype)initWithScene:(UIWindowScene *)scene {
+    self = [super initWithWindowScene:scene];
     if (self) {
+        self.frame = CGRectMake(30, 100, 700, 480);
         self.windowLevel = UIWindowLevelAlert + 1;
         self.backgroundColor = [UIColor clearColor];
         self.layer.cornerRadius = 20;
@@ -316,9 +316,18 @@ __attribute__((constructor)) static void init() {
         }
         sleep(5);
         dispatch_async(dispatch_get_main_queue(), ^{
-            g_ui = [[NekoUI alloc] init];
-            g_ui.rootViewController = [[UIViewController alloc] init];
-            [g_ui makeKeyAndVisible];
+            UIWindowScene *scene = nil;
+            for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+                if (s.activationState == UISceneActivationStateForegroundActive) {
+                    scene = (UIWindowScene *)s;
+                    break;
+                }
+            }
+            if (scene) {
+                g_ui = [[NekoUI alloc] initWithScene:scene];
+                g_ui.rootViewController = [[UIViewController alloc] init];
+                [g_ui makeKeyAndVisible];
+            }
         });
     });
 }
