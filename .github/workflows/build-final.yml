@@ -1,38 +1,21 @@
-name: Build Neko Final
+name: Build Neko Docker
 on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: ghcr.io/theos/theos:latest
     steps:
       - uses: actions/checkout@v4
       
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y make git curl clang libplist-dev fakeroot libssl-dev libtinfo6
-          
-      - name: Install Ldid
-        run: |
-          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
-          sudo mv ldid_linux_x86_64 /usr/local/bin/ldid
-          sudo chmod +x /usr/local/bin/ldid
-          
-      - name: Install Theos
-        run: |
-          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
-          
-      - name: Download Apple Clang Toolchain
-        run: |
-          # Download the official Theos Linux Toolchain (Contains Apple's Clang)
-          curl -LO https://github.com/theos/toolchain/releases/download/linux-2.0/linux-toolchain.tar.gz
-          tar -xzf linux-toolchain.tar.gz -C $GITHUB_WORKSPACE/theos
+          apt-get update
+          apt-get install -y make git curl libplist-dev fakeroot libssl-dev
           
       - name: Download iOS SDK
         run: |
-          rm -rf $GITHUB_WORKSPACE/theos/sdks
-          git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
+          rm -rf $THEOS/sdks
+          git clone --depth 1 https://github.com/theos/sdks.git $THEOS/sdks
           
       - name: Compile Luau
         run: |
@@ -40,21 +23,19 @@ jobs:
           cd vendor/luau-src
           mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
           
-          SDK_PATH=$(find $GITHUB_WORKSPACE/theos/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          SDK_PATH=$(find $THEOS/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Use the newly downloaded Apple Clang
-          CLANG=$GITHUB_WORKSPACE/theos/toolchain/linux/iphone/bin/clang++
-          
+          # This uses the Docker image's built-in Apple Clang
           mkdir -p build_vm
           for f in VM/src/*.cpp; do
-            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
           
           mkdir -p build_compiler
           for f in Compiler/src/*.cpp; do
-            $CLANG -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
           done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
           
@@ -64,7 +45,6 @@ jobs:
           
       - name: Build Neko Tweak
         run: |
-          export THEOS=$GITHUB_WORKSPACE/theos
           export PATH=$THEOS/bin:$PATH
           make clean
           make
