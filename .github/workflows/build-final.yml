@@ -1,41 +1,71 @@
-name: Build Neko
+name: Build Neko Pure
 on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup
+
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
+
+      - name: Download SDK, Substrate, and Headers
+        run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
           git clone --depth 1 https://github.com/theos/lib.git theos_lib
-      - name: Luau
+          git clone --depth 1 https://github.com/theos/headers.git theos_headers
+
+      - name: Compile Luau
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
           mkdir -p ../../vendor/luau/lib ../../vendor/luau/include
+          
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
+          
           mkdir -p build_vm
-          for f in VM/src/*.cpp; do clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"; done
+          for f in VM/src/*.cpp; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
+          done
           ar rcs ../../vendor/luau/lib/Luau.VM.a build_vm/*.o
+          
           mkdir -p build_compiler
-          for f in Compiler/src/*.cpp; do clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"; done
+          for f in Compiler/src/*.cpp; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
+          done
           ar rcs ../../vendor/luau/lib/Luau.Compiler.a build_compiler/*.o
-          for d in $(find . -type d -name "include"); do cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true; done
-      - name: Build
+          
+          for d in $(find . -type d -name "include"); do
+            cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
+          done
+
+      - name: Compile Tweak Directly
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include"
+          
+          # Notice the added -I$GITHUB_WORKSPACE/theos_headers/substrate
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include -I$GITHUB_WORKSPACE/theos_headers/substrate"
+          
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -framework Foundation -framework UIKit Api.o Tweak.o -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate -o neko.dylib
+          
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
+            -framework Foundation -framework UIKit \
+            Api.o Tweak.o \
+            -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
+            -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
+            -o neko.dylib
+
           zip neko-dylib-final.zip neko.dylib
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: neko-dylib
+          name: neko-dylib-final
           path: neko-dylib-final.zip
