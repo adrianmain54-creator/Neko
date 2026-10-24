@@ -11,11 +11,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make git curl clang cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
 
-      - name: Download SDK, Substrate, and Headers
+      - name: Download SDK and Theos
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
-          git clone --depth 1 https://github.com/theos/lib.git theos_lib
-          git clone --depth 1 https://github.com/theos/headers.git theos_headers
+          git clone --depth 1 https://github.com/theos/theos.git theos
 
       - name: Compile Luau
         run: |
@@ -49,8 +48,8 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          # Notice the added -I$GITHUB_WORKSPACE/theos_headers/substrate
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include -I$GITHUB_WORKSPACE/theos_headers/substrate"
+          # Pointing to the exact Theos vendor folder that has substrate.h
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos/vendor/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
@@ -59,7 +58,7 @@ jobs:
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
             -Lvendor/luau/lib -lLuau.VM -lLuau.Compiler \
-            -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
+            -F$GITHUB_WORKSPACE/theos/vendor/lib -framework CydiaSubstrate \
             -o neko.dylib
 
           zip neko-dylib-final.zip neko.dylib
