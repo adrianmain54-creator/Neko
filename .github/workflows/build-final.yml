@@ -5,23 +5,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Theos via Action
-        uses: Randomblock1/theos-action@v1
-        with:
-          theos-dir: 'theos'
-          theos-src: 'https://github.com/theos/theos'
-          theos-sdks: 'https://github.com/theos/sdks'
-          theos-sdks-branch: 'master'
-          
-      - name: Create SDK Directory (Fix for previous error)
-        run: mkdir -p $GITHUB_WORKSPACE/theos/sdks
-          
-      - name: Download iOS SDK
+
+      - name: Install Dependencies
         run: |
-          rm -rf $GITHUB_WORKSPACE/theos/sdks
+          sudo apt-get update
+          sudo apt-get install -y make git curl clang cmake ninja-build libplist-dev fakeroot libssl-dev libtinfo6
+
+      - name: Install Theos Manually
+        run: |
+          # 1. Clone Theos
+          git clone --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+          echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
+
+          # 2. Create the missing sdks folder (This fixes the error)
+          mkdir -p $GITHUB_WORKSPACE/theos/sdks
+
+          # 3. Clone the SDKs directly into it
           git clone --depth 1 https://github.com/theos/sdks.git $GITHUB_WORKSPACE/theos/sdks
-          
+
       - name: Compile Luau
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
@@ -46,14 +48,14 @@ jobs:
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
-          
+
       - name: Build Neko Tweak
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
           export PATH=$THEOS/bin:$PATH
           make clean
           make
-          
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
