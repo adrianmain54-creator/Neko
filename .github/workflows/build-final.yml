@@ -15,7 +15,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile Luau (VM, Compiler, and Ast)
+      - name: Compile All Luau Modules
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
@@ -24,22 +24,12 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Compile VM
-          mkdir -p build_vm
-          for f in VM/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_vm/$(basename $f).o"
-          done
-          
-          # Compile Compiler
-          mkdir -p build_compiler
-          for f in Compiler/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_compiler/$(basename $f).o"
-          done
-          
-          # Compile Ast (this fixes the gAstRttiIndex error)
-          mkdir -p build_ast
-          for f in Ast/src/*.cpp; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_ast/$(basename $f).o"
+          # Compile every single module to prevent missing symbols
+          for module in VM Compiler Ast Common Analysis; do
+            mkdir -p "build_$module"
+            for f in $module/src/*.cpp; do
+              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_$module/$(basename $f).o"
+            done
           done
           
           for d in $(find . -type d -name "include"); do
@@ -58,16 +48,16 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link ALL object files, including the Ast ones
+          # Link ALL object files from every module
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -undefined dynamic_lookup \
             -framework Foundation -framework UIKit \
             Api.o Tweak.o \
-            vendor/luau-src/build_vm/*.o vendor/luau-src/build_compiler/*.o vendor/luau-src/build_ast/*.o \
+            vendor/luau-src/build_VM/*.o vendor/luau-src/build_Compiler/*.o \
+            vendor/luau-src/build_Ast/*.o vendor/luau-src/build_Common/*.o vendor/luau-src/build_Analysis/*.o \
             -o neko.dylib
 
       - name: Sign Dylib
         run: |
-          # Download ldid and sign the dylib so LiveContainer accepts it
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
