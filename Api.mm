@@ -2,7 +2,6 @@
 #import <UIKit/UIKit.h>
 #include "Neko.h"
 #include <dlfcn.h>
-#include <substrate.h>
 #include <string.h>
 
 static lua_State* g_L = nullptr;
@@ -14,25 +13,9 @@ struct Closure {
     union { struct { void* p; void* execdata; } l; struct { lua_CFunction f; void* cont; } c; };
 };
 
-static lua_CFunction orig_namecall = nullptr;
-
-static int namecall_hook(lua_State* L) {
-    const char* m = lua_namecallatom(L, nullptr);
-    if (m) { strncpy(g_namecallMethod, m, 63); g_namecallMethod[63] = 0; }
-    return orig_namecall(L);
-}
-
+// Dummy hook function that does nothing to avoid substrate requirement
 void neko_install_hooks(lua_State* L) {
-    lua_getglobal(L, "game");
-    if (lua_getmetatable(L, -1)) {
-        lua_getfield(L, -1, "__namecall");
-        if (lua_iscfunction(L, -1)) {
-            void* target = (void*)lua_tocfunction(L, -1);
-            MSHookFunction(target, (void*)namecall_hook, (void**)&orig_namecall);
-        }
-        lua_pop(L, 1);
-    }
-    lua_pop(L, 2);
+    // We removed MSHookFunction to prevent instant crash on iOS 27
 }
 
 static int l_HttpGet(lua_State* L) {
