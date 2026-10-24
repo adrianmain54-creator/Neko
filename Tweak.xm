@@ -57,26 +57,23 @@ int ExecuteScript(const char* code) {
         self.layer.masksToBounds = YES;
         self.layer.borderWidth = 1.5;
 
-        // Define Themes
         g_themeColors = @[
-            [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0], // Purple
-            [UIColor colorWithRed:0.0 green:0.8 blue:1.0 alpha:1.0],    // Cyan
-            [UIColor colorWithRed:0.2 green:0.4 blue:1.0 alpha:1.0],    // Blue
-            [UIColor colorWithRed:0.0 green:1.0 blue:0.5 alpha:1.0],    // Green
-            [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0],    // Red
-            [UIColor colorWithRed:1.0 green:0.4 blue:0.8 alpha:1.0],    // Pink
-            [UIColor colorWithRed:1.0 green:0.8 blue:0.2 alpha:1.0]     // Yellow
+            [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0],
+            [UIColor colorWithRed:0.0 green:0.8 blue:1.0 alpha:1.0],
+            [UIColor colorWithRed:0.2 green:0.4 blue:1.0 alpha:1.0],
+            [UIColor colorWithRed:0.0 green:1.0 blue:0.5 alpha:1.0],
+            [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0],
+            [UIColor colorWithRed:1.0 green:0.4 blue:0.8 alpha:1.0],
+            [UIColor colorWithRed:1.0 green:0.8 blue:0.2 alpha:1.0]
         ];
         g_themeColor = g_themeColors[0];
 
-        // 1. Frosted Glass Background
         UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
         self.blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
         self.blurView.frame = self.bounds;
         self.blurView.backgroundColor = UI_BG_COLOR;
         [self addSubview:self.blurView];
 
-        // Chevron (Stealth)
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         self.chevronBtn.frame = CGRectMake(0, 200, 30, 50);
         [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
@@ -86,18 +83,15 @@ int ExecuteScript(const char* code) {
         self.chevronBtn.hidden = YES;
         [self addSubview:self.chevronBtn];
 
-        // Main Container
         self.mainContainer = [[UIView alloc] initWithFrame:self.bounds];
         self.mainContainer.hidden = YES;
         [self addSubview:self.mainContainer];
 
-        // 2. Top Left NEKO Text
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, 100, 30)];
         self.titleLabel.text = @"NEKO";
         self.titleLabel.font = [UIFont fontWithName:@"AvenirNext-Heavy" size:24];
         [self.mainContainer addSubview:self.titleLabel];
 
-        // 3. Sidebar (Left)
         UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(10, 60, 80, 400)];
         sidebar.backgroundColor = UI_SIDEBAR_COLOR;
         sidebar.layer.cornerRadius = 15;
@@ -123,9 +117,6 @@ int ExecuteScript(const char* code) {
             
             if (i == 0) {
                 self.sideExecBtn = btn;
-                btn.backgroundColor = [g_themeColor colorWithAlphaComponent:0.3];
-                [btn setTintColor:g_themeColor];
-                lbl.textColor = g_themeColor;
             } else {
                 btn.backgroundColor = [UIColor clearColor];
                 [btn setTintColor:[UIColor grayColor]];
@@ -134,7 +125,6 @@ int ExecuteScript(const char* code) {
             [sidebar addSubview:btn];
         }
 
-        // 4. Luau Editor (Center)
         UIView *editorPanel = [[UIView alloc] initWithFrame:CGRectMake(100, 60, 340, 340)];
         editorPanel.backgroundColor = UI_PANEL_COLOR;
         editorPanel.layer.cornerRadius = 15;
@@ -149,7 +139,6 @@ int ExecuteScript(const char* code) {
         self.editor.text = @"-- A little space for your next idea.\n\nlocal message = \"Hello, world!\"\n\nlocal function greet(name)\n    print(message .. \" From \" .. name)\nend";
         [editorPanel addSubview:self.editor];
 
-        // 5. Console (Right)
         UIView *consolePanel = [[UIView alloc] initWithFrame:CGRectMake(450, 60, 240, 340)];
         consolePanel.backgroundColor = UI_PANEL_COLOR;
         consolePanel.layer.cornerRadius = 15;
@@ -167,7 +156,6 @@ int ExecuteScript(const char* code) {
         self.console.editable = NO;
         [consolePanel addSubview:self.console];
 
-        // 6. Logs (Bottom Middle)
         UIView *logsPanel = [[UIView alloc] initWithFrame:CGRectMake(100, 410, 340, 60)];
         logsPanel.backgroundColor = UI_PANEL_COLOR;
         logsPanel.layer.cornerRadius = 15;
@@ -179,18 +167,15 @@ int ExecuteScript(const char* code) {
         self.logsLabel.font = [UIFont fontWithName:@"Menlo" size:11];
         [logsPanel addSubview:self.logsLabel];
 
-        // 7. User (Bottom Right)
         UILabel *userLabel = [[UILabel alloc] initWithFrame:CGRectMake(450, 430, 240, 20)];
         userLabel.text = @"👤 User: Aoid";
         userLabel.textColor = [UIColor whiteColor];
         userLabel.font = [UIFont boldSystemFontOfSize:13];
         [self.mainContainer addSubview:userLabel];
 
-        // 8. Bottom Bar (Features)
         UIView *bottomBar = [[UIView alloc] initWithFrame:CGRectMake(100, 480, 590, 50)];
         [self.mainContainer addSubview:bottomBar];
 
-        // Execute Button
         self.execBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         self.execBtn.frame = CGRectMake(0, 0, 130, 40);
         [self.execBtn setTitle:@"▶ Execute" forState:UIControlStateNormal];
@@ -200,7 +185,6 @@ int ExecuteScript(const char* code) {
         [self.execBtn addTarget:self action:@selector(execute) forControlEvents:UIControlEventTouchUpInside];
         [bottomBar addSubview:self.execBtn];
 
-        // FPS Boost
         UIButton *fpsBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         fpsBtn.frame = CGRectMake(140, 0, 100, 40);
         [fpsBtn setTitle:@"FPS Boost" forState:UIControlStateNormal];
@@ -210,7 +194,6 @@ int ExecuteScript(const char* code) {
         [fpsBtn addTarget:self action:@selector(runFPS) forControlEvents:UIControlEventTouchUpInside];
         [bottomBar addSubview:fpsBtn];
 
-        // Theme
         UIButton *themeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         themeBtn.frame = CGRectMake(250, 0, 100, 40);
         [themeBtn setTitle:@"Theme" forState:UIControlStateNormal];
@@ -220,7 +203,6 @@ int ExecuteScript(const char* code) {
         [themeBtn addTarget:self action:@selector(changeTheme) forControlEvents:UIControlEventTouchUpInside];
         [bottomBar addSubview:themeBtn];
 
-        // Resize
         UIButton *resizeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         resizeBtn.frame = CGRectMake(360, 0, 100, 40);
         [resizeBtn setTitle:@"⛶ Resize" forState:UIControlStateNormal];
@@ -230,12 +212,10 @@ int ExecuteScript(const char* code) {
         [resizeBtn addTarget:self action:@selector(toggleResize) forControlEvents:UIControlEventTouchUpInside];
         [bottomBar addSubview:resizeBtn];
 
-        // Stealth Gesture (Swipe Left 2x)
         UISwipeGestureRecognizer *swipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleSwipe:)];
         swipe.direction = UISwipeGestureRecognizerDirectionLeft;
         [self addGestureRecognizer:swipe];
 
-        // Apply initial theme
         [self applyTheme];
     }
     return self;
@@ -322,10 +302,13 @@ __attribute__((constructor)) static void init() {
             @autoreleasepool {
                 Class PlayersClass = NSClassFromString(@"Players");
                 if (PlayersClass) {
-                    id localPlayer = [[PlayersClass sharedPlayers] performSelector:@selector(LocalPlayer)];
-                    if (localPlayer) {
-                        id character = [localPlayer performSelector:@selector(Character)];
-                        if (character) break; 
+                    id sharedPlayers = [PlayersClass performSelector:@selector(sharedPlayers)];
+                    if (sharedPlayers) {
+                        id localPlayer = [sharedPlayers performSelector:@selector(LocalPlayer)];
+                        if (localPlayer) {
+                            id character = [localPlayer performSelector:@selector(Character)];
+                            if (character) break; 
+                        }
                     }
                 }
             }
