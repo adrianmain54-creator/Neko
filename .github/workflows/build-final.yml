@@ -15,7 +15,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile All Luau Modules
+      - name: Compile Luau to Static Library
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
@@ -23,13 +23,15 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          for module in VM Compiler Ast Common Analysis; do
-            mkdir -p "build_$module"
-            for f in $module/src/*.cpp; do
-              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_$module/$(basename $f).o"
-            done
+          # Compile everything
+          find . -name "*.cpp" | while read f; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "${f%.cpp}.o"
           done
           
+          # Create a giant static library so linker doesn't drop files
+          find . -name "*.o" | xargs ar rcs libLuau.a
+          
+          # Copy headers
           for d in $(find . -type d -name "include"); do
             mkdir -p ../../vendor/luau/include
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
@@ -47,12 +49,11 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          LUAU_OBJS=$(find vendor/luau-src -name "*.o" | tr '\n' ' ')
-          
+          # Link using the static library
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
-            -Wl,-all_load \
-            -framework Foundation -framework UIKit \
-            Api.o Tweak.o $LUAU_OBJS \
+            -framework Foundation -framework UIKit -framework CoreGraphics \
+            Api.o Tweak.o \
+            vendor/luau-src/libLuau.a \
             -o neko.dylib
 
       - name: Sign Dylib
