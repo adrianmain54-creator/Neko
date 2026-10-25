@@ -38,13 +38,12 @@ jobs:
           
           cmake --build build -j --target Luau.VM Luau.Compiler
           
-          # Extract object files instead of linking .a archives
-          mkdir -p ../../vendor/luau/extracted
-          cd ../../vendor/luau/extracted
-          ar x ../vendor/luau-src/build/libLuau.VM.a
-          ar x ../vendor/luau-src/build/libLuau.Compiler.a
-          cd ../../..
+          # FIXED PATHS: Extract all compiled .o files directly using absolute paths
+          mkdir -p $GITHUB_WORKSPACE/vendor/luau/extracted
+          cd $GITHUB_WORKSPACE/vendor/luau/extracted
+          find $GITHUB_WORKSPACE/vendor/luau-src/build -name "*.a" -exec ar x {} \;
           
+          cd $GITHUB_WORKSPACE
           mkdir -p vendor/luau/include
           for d in $(find vendor/luau-src -type d -name "include"); do
             cp -r $d/* vendor/luau/include/ 2>/dev/null || true
