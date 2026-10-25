@@ -1,107 +1,18 @@
-name: Build Neko IPA
-on: [push, workflow_dispatch]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+#pragma once
+#include <stdint.h>
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip unzip python3 python3-pip
-          pip3 install lief
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-      - name: Download SDK
-        run: |
-          git clone --depth 1 https://github.com/theos/sdks.git sdks
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
+#include "luacode.h"
 
-      - name: Build Luau for iOS with CMake
-        run: |
-          git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
-          cd vendor/luau-src
-          
-          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          
-          cmake -B build \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_ARCHITECTURES="arm64" \
-            -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
-            -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DLUAU_BUILD_TESTS=OFF \
-            -DLUAU_BUILD_CLI=OFF \
-            -DLUAU_BUILD_WEB=OFF
-          
-          cmake --build build -j --target Luau.VM Luau.Compiler
-          
-          # Extract object files instead of linking .a archives
-          mkdir -p ../../vendor/luau/extracted
-          cd ../../vendor/luau/extracted
-          ar x ../vendor/luau-src/build/libLuau.VM.a
-          ar x ../vendor/luau-src/build/libLuau.Compiler.a
-          cd ../../..
-          
-          mkdir -p vendor/luau/include
-          for d in $(find vendor/luau-src -type d -name "include"); do
-            cp -r $d/* vendor/luau/include/ 2>/dev/null || true
-          done
+#ifdef __cplusplus
+}
+#endif
 
-      - name: Compile and Link Tweak
-        run: |
-          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          
-          touch vendor/luau/include/lauxlib.h
-          mv Tweak.xm Tweak.mm
-          
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
-          
-          clang++ $FLAGS -c Tweak.mm -o Tweak.o
-          clang++ $FLAGS -c Api.mm -o Api.o
-          
-          # Link ALL extracted .o files directly
-          LUAU_OBJS=$(find vendor/luau/extracted -name "*.o" | tr '\n' ' ')
-          
-          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
-            -framework Foundation -framework UIKit -framework CoreGraphics \
-            Api.o Tweak.o $LUAU_OBJS \
-            -o neko.dylib
-
-      - name: Sign Dylib
-        run: |
-          curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
-          chmod +x ldid_linux_x86_64
-          ./ldid_linux_x86_64 -S neko.dylib
-
-      - name: Download Roblox IPA
-        run: |
-          curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
-
-      - name: Inject Dylib into IPA
-        run: |
-          mkdir extract
-          unzip roblox.ipa -d extract
-          
-          cp neko.dylib extract/Payload/Roblox.app/
-          
-          python3 -c "
-          import lief
-          bin_path = 'extract/Payload/Roblox.app/Roblox'
-          binary = lief.parse(bin_path)
-          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
-          binary.add(dylib_cmd)
-          binary.write(bin_path)
-          "
-          
-          cd extract
-          zip -qry ../Neko-Roblox.ipa Payload
-          cd ..
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Neko-Roblox-IPA
-          path: Neko-Roblox.ipa
+void neko_register_api(lua_State* L);
+void neko_install_hooks(lua_State* L);
