@@ -9,42 +9,49 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld zip unzip python3 python3-pip
+          sudo apt-get install -y make git curl clang lld cmake zip unzip python3 python3-pip
           pip3 install lief
 
       - name: Download SDK
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile Luau Directly (No CMake)
+      - name: Build Luau for iOS with CMake
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          mkdir -p build_all
-          # Compile every .cpp file to object files
-          for module in VM Compiler Ast Common; do
-            for f in $module/src/*.cpp; do
-              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_all/$(basename $f).o" || true
-            done
-          done
+          cmake -B build \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES="arm64" \
+            -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
+            -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLUAU_BUILD_TESTS=OFF \
+            -DLUAU_BUILD_CLI=OFF \
+            -DLUAU_BUILD_WEB=OFF
           
-          # Fix missing FFlag manually
-          cat << 'EOF' > Flags.cpp
-          #include "Luau/Common.h"
-          LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
-          EOF
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c Flags.cpp -o build_all/Flags.o
+          cmake --build build -j --target Luau.VM Luau.Compiler
           
+          mkdir -p ../../vendor/luau/lib
           mkdir -p ../../vendor/luau/include
+          
+          cp build/libLuau.VM.a ../../vendor/luau/lib/
+          cp build/libLuau.Compiler.a ../../vendor/luau/lib/
+          
+          ranlib ../../vendor/luau/lib/libLuau.VM.a
+          ranlib ../../vendor/luau/lib/libLuau.Compiler.a
+          
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Compile Dylib and Link
+      - name: Compile and Link Tweak
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
@@ -56,10 +63,11 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link everything into one dylib, avoiding .a archives entirely
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics \
-            Api.o Tweak.o vendor/luau-src/build_all/*.o \
+            Api.o Tweak.o \
+            vendor/luau/lib/libLuau.VM.a \
+            vendor/luau/lib/libLuau.Compiler.a \
             -o neko.dylib
 
       - name: Sign Dylib
@@ -68,25 +76,27 @@ jobs:
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
 
-      - name: Inject Dylib into IPA (Cloud Injection)
+      - name: Download Roblox IPA
+        run: |
+          # DOWNLOAD THE IPA DIRECTLY IN THE CLOUD
+          curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
+
+      - name: Inject Dylib into IPA
         run: |
           mkdir extract
           unzip roblox.ipa -d extract
           
-          # Copy dylib into the app
           cp neko.dylib extract/Payload/Roblox.app/
           
-          # Use Python lief to inject the load command directly into the binary
           python3 -c "
           import lief
           bin_path = 'extract/Payload/Roblox.app/Roblox'
           binary = lief.parse(bin_path)
-          dylib = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
-          binary.add(dylib)
+          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
+          binary.add(dylib_cmd)
           binary.write(bin_path)
           "
           
-          # Re-zip the IPA
           cd extract
           zip -qry ../Neko-Roblox.ipa Payload
           cd ..
