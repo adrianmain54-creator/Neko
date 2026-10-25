@@ -22,11 +22,15 @@ jobs:
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          # Configure CMake for iOS
+          # Configure CMake for iOS using CLANG
           cmake -B build \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_ARCHITECTURES="arm64" \
             -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
+            -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLUAU_BUILD_TESTS=OFF \
             -DLUAU_BUILD_CLI=OFF \
@@ -54,7 +58,7 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fobjc-arc -I. -Ivendor/luau/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
