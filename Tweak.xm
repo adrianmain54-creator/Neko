@@ -23,7 +23,6 @@ int ExecuteScript(const char* code) {
     return 0;
 }
 
-// Notice the STR delimiter instead of just quotes
 const char* HTML_UI = R"STR(
 <!DOCTYPE html>
 <html>
@@ -45,7 +44,7 @@ const char* HTML_UI = R"STR(
         border-bottom: 1px solid rgba(255,255,255,0.1);
     }
     .title { color: #bf5af2; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
-    .close { color: #ff453a; font-size: 20px; cursor: pointer; padding: 5px; font-weight: bold; }
+    .close { color: #ff453a; font-size: 24px; cursor: pointer; padding: 5px; font-weight: bold; }
     .content { display: flex; flex: 1; padding: 15px; gap: 15px; }
     .left-panel { flex: 2; display: flex; flex-direction: column; gap: 15px; }
     .right-panel { flex: 1; display: flex; flex-direction: column; gap: 15px; }
@@ -102,6 +101,7 @@ const char* HTML_UI = R"STR(
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) UIView *triggerView;
+@property (nonatomic, strong) UIButton *chevronBtn;
 @end
 
 @implementation NekoUI
@@ -113,14 +113,29 @@ const char* HTML_UI = R"STR(
         self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
 
-        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 40, self.bounds.size.height)];
+        // 1. Massive 100px Invisible Swipe Trigger Area
+        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, self.bounds.size.height)];
         self.triggerView.backgroundColor = [UIColor clearColor];
         [self addSubview:self.triggerView];
         
-        UISwipeGestureRecognizer *swipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(showUI)];
-        swipe.direction = UISwipeGestureRecognizerDirectionRight;
-        [self.triggerView addGestureRecognizer:swipe];
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.triggerView addGestureRecognizer:pan];
 
+        // 2. Huge Glowing Chevron Button
+        self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        self.chevronBtn.frame = CGRectMake(0, 300, 60, 120); 
+        [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
+        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:45];
+        self.chevronBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.9];
+        self.chevronBtn.layer.cornerRadius = 15;
+        self.chevronBtn.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner; // Only round the right side
+        self.chevronBtn.layer.borderWidth = 2.0;
+        self.chevronBtn.layer.borderColor = [UIColor whiteColor].CGColor;
+        [self.chevronBtn addTarget:self action:@selector(showUI) forControlEvents:UIControlEventTouchUpInside];
+        self.chevronBtn.hidden = YES;
+        [self addSubview:self.chevronBtn];
+
+        // 3. WebView
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
@@ -137,14 +152,62 @@ const char* HTML_UI = R"STR(
     return self;
 }
 
+// Touch Logic: Only let the WebView, Chevron, or Trigger capture touches
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.webView.hidden) {
+        if (!self.chevronBtn.hidden) {
+            if (CGRectContainsPoint(self.chevronBtn.frame, point)) {
+                return self.chevronBtn;
+            }
+        }
         if (CGRectContainsPoint(self.triggerView.frame, point)) {
             return self.triggerView;
         }
-        return nil;
+        return nil; // Pass everything else to Roblox
     }
     return [super hitTest:point withEvent:event];
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateEnded) {
+        CGPoint translation = [gesture translationInView:self];
+        if (translation.x > 20) { // Swiped right
+            self.chevronBtn.hidden = NO;
+            self.chevronBtn.alpha = 0;
+            [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
+            
+            // Auto hide chevron after 5 seconds if they don't tap it
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
+            [self performSelector:@selector(hideChevron) withObject:nil afterDelay:5.0];
+        }
+    }
+}
+
+- (void)hideChevron {
+    [UIView animateWithDuration:0.2 animations:^{
+        self.chevronBtn.alpha = 0;
+    } completion:^(BOOL finished) {
+        self.chevronBtn.hidden = YES;
+    }];
+}
+
+- (void)showUI {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
+    self.chevronBtn.hidden = YES;
+    
+    self.webView.hidden = NO;
+    self.webView.alpha = 0;
+    [UIView animateWithDuration:0.3 animations:^{
+        self.webView.alpha = 1;
+    }];
+}
+
+- (void)hideUI {
+    [UIView animateWithDuration:0.3 animations:^{
+        self.webView.alpha = 0;
+    } completion:^(BOOL finished) {
+        self.webView.hidden = YES;
+    }];
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
@@ -164,22 +227,6 @@ const char* HTML_UI = R"STR(
             [self.webView evaluateJavaScript:js completionHandler:nil];
         });
     });
-}
-
-- (void)showUI {
-    self.webView.hidden = NO;
-    self.webView.alpha = 0;
-    [UIView animateWithDuration:0.3 animations:^{
-        self.webView.alpha = 1;
-    }];
-}
-
-- (void)hideUI {
-    [UIView animateWithDuration:0.3 animations:^{
-        self.webView.alpha = 0;
-    } completion:^(BOOL finished) {
-        self.webView.hidden = YES;
-    }];
 }
 
 @end
