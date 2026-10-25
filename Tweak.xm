@@ -8,9 +8,10 @@ static UIColor *g_themeColor;
 static int g_themeIndex = 0;
 static NSArray *g_themeColors;
 
-#define UI_BG_COLOR [UIColor colorWithRed:0.08 green:0.06 blue:0.12 alpha:0.85]
-#define UI_SIDEBAR_COLOR [UIColor colorWithRed:0.12 green:0.10 blue:0.18 alpha:0.9]
-#define UI_PANEL_COLOR [UIColor colorWithRed:0.15 green:0.13 blue:0.22 alpha:0.8]
+// Replaced Blur with Solid Color for FPS
+#define UI_BG_COLOR [UIColor colorWithWhite:0.05 alpha:0.95]
+#define UI_SIDEBAR_COLOR [UIColor colorWithWhite:0.1 alpha:1.0]
+#define UI_PANEL_COLOR [UIColor colorWithWhite:0.15 alpha:1.0]
 
 static lua_State* g_L = nullptr;
 
@@ -32,7 +33,6 @@ int ExecuteScript(const char* code) {
 }
 
 @interface NekoUI : UIWindow <UIDocumentPickerDelegate>
-@property (nonatomic, strong) UIVisualEffectView *blurView;
 @property (nonatomic, strong) UIView *mainContainer;
 @property (nonatomic, strong) UITextView *editor;
 @property (nonatomic, strong) UITextView *console;
@@ -51,7 +51,7 @@ int ExecuteScript(const char* code) {
     if (self) {
         self.frame = CGRectMake(30, 100, 700, 480);
         self.windowLevel = UIWindowLevelAlert + 1;
-        self.backgroundColor = [UIColor clearColor];
+        self.backgroundColor = UI_BG_COLOR;
         self.layer.cornerRadius = 24;
         self.layer.masksToBounds = YES;
         self.layer.borderWidth = 1.5;
@@ -63,12 +63,6 @@ int ExecuteScript(const char* code) {
             [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0]
         ];
         g_themeColor = g_themeColors[0];
-
-        UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
-        self.blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
-        self.blurView.frame = self.bounds;
-        self.blurView.backgroundColor = UI_BG_COLOR;
-        [self addSubview:self.blurView];
 
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         self.chevronBtn.frame = CGRectMake(0, 200, 30, 50);
@@ -225,8 +219,6 @@ int ExecuteScript(const char* code) {
         self.chevronBtn.hidden = NO;
         self.chevronBtn.alpha = 0;
         [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
-        UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-        [gen impactOccurred];
     }
 }
 
@@ -241,9 +233,6 @@ int ExecuteScript(const char* code) {
         self.mainContainer.transform = CGAffineTransformIdentity;
         self.mainContainer.alpha = 1;
     } completion:nil];
-    
-    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [gen impactOccurred];
 }
 
 - (void)toggleResize {
@@ -255,7 +244,6 @@ int ExecuteScript(const char* code) {
             self.frame = [UIScreen mainScreen].bounds;
             self.isFullScreen = YES;
         }
-        self.blurView.frame = self.bounds;
         self.mainContainer.frame = self.bounds;
     } completion:nil];
 }
@@ -270,9 +258,6 @@ int ExecuteScript(const char* code) {
     NSString *code = self.editor.text;
     if (code.length == 0) return;
     self.logsLabel.text = @"[Logs] Executing...";
-    
-    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
-    [gen impactOccurred];
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         int res = ExecuteScript([code UTF8String]);
