@@ -23,8 +23,8 @@ int ExecuteScript(const char* code) {
     return 0;
 }
 
-// The HTML/CSS/JS UI as a raw string
-const char* HTML_UI = R"(
+// Notice the STR delimiter instead of just quotes
+const char* HTML_UI = R"STR(
 <!DOCTYPE html>
 <html>
 <head>
@@ -45,7 +45,7 @@ const char* HTML_UI = R"(
         border-bottom: 1px solid rgba(255,255,255,0.1);
     }
     .title { color: #bf5af2; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
-    .close { color: #ff453a; font-size: 24px; cursor: pointer; padding: 5px; font-weight: bold; }
+    .close { color: #ff453a; font-size: 20px; cursor: pointer; padding: 5px; font-weight: bold; }
     .content { display: flex; flex: 1; padding: 15px; gap: 15px; }
     .left-panel { flex: 2; display: flex; flex-direction: column; gap: 15px; }
     .right-panel { flex: 1; display: flex; flex-direction: column; gap: 15px; }
@@ -68,7 +68,7 @@ const char* HTML_UI = R"(
     <div class="window">
         <div class="header">
             <div class="title">NEKO</div>
-            <div class="close" onclick="closeUI()">✖</div>
+            <div class="close" onclick="closeUI()">X</div>
         </div>
         <div class="content">
             <div class="left-panel">
@@ -97,7 +97,7 @@ const char* HTML_UI = R"(
     </script>
 </body>
 </html>
-)";
+)STR";
 
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
@@ -113,7 +113,6 @@ const char* HTML_UI = R"(
         self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
 
-        // Invisible Swipe Trigger Area (Left edge)
         self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 40, self.bounds.size.height)];
         self.triggerView.backgroundColor = [UIColor clearColor];
         [self addSubview:self.triggerView];
@@ -122,7 +121,6 @@ const char* HTML_UI = R"(
         swipe.direction = UISwipeGestureRecognizerDirectionRight;
         [self.triggerView addGestureRecognizer:swipe];
 
-        // Setup WKWebView
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
@@ -139,18 +137,16 @@ const char* HTML_UI = R"(
     return self;
 }
 
-// Touch Logic: Only let the WebView or Trigger capture touches
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.webView.hidden) {
         if (CGRectContainsPoint(self.triggerView.frame, point)) {
             return self.triggerView;
         }
-        return nil; // Pass to Roblox
+        return nil;
     }
     return [super hitTest:point withEvent:event];
 }
 
-// Catch messages from JavaScript
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.body isKindOfClass:[NSString class]]) return;
     NSString *body = message.body;
@@ -160,7 +156,6 @@ const char* HTML_UI = R"(
         return;
     }
     
-    // Run the script
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         int res = ExecuteScript([body UTF8String]);
         dispatch_async(dispatch_get_main_queue(), ^{
