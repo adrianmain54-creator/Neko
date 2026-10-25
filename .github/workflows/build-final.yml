@@ -1,4 +1,4 @@
-name: Build Neko IPA
+name: Build Neko Dylib
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -9,8 +9,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip unzip python3 python3-pip
-          pip3 install lief
+          sudo apt-get install -y make git curl clang lld cmake zip
 
       - name: Download SDK
         run: |
@@ -38,7 +37,6 @@ jobs:
           
           cmake --build build -j --target Luau.VM Luau.Compiler
           
-          # FIXED PATHS: Extract all compiled .o files directly using absolute paths
           mkdir -p $GITHUB_WORKSPACE/vendor/luau/extracted
           cd $GITHUB_WORKSPACE/vendor/luau/extracted
           find $GITHUB_WORKSPACE/vendor/luau-src/build -name "*.a" -exec ar x {} \;
@@ -61,7 +59,6 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link ALL extracted .o files directly
           LUAU_OBJS=$(find vendor/luau/extracted -name "*.o" | tr '\n' ' ')
           
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
@@ -74,33 +71,10 @@ jobs:
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
-
-      - name: Download Roblox IPA
-        run: |
-          curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
-
-      - name: Inject Dylib into IPA
-        run: |
-          mkdir extract
-          unzip roblox.ipa -d extract
-          
-          cp neko.dylib extract/Payload/Roblox.app/
-          
-          python3 -c "
-          import lief
-          bin_path = 'extract/Payload/Roblox.app/Roblox'
-          binary = lief.parse(bin_path)
-          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
-          binary.add(dylib_cmd)
-          binary.write(bin_path)
-          "
-          
-          cd extract
-          zip -qry ../Neko-Roblox.ipa Payload
-          cd ..
+          zip neko-dylib.zip neko.dylib
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Neko-Roblox-IPA
-          path: Neko-Roblox.ipa
+          name: neko-dylib
+          path: neko-dylib.zip
