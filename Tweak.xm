@@ -31,7 +31,8 @@ int ExecuteScript(const char* code) {
     return 0;
 }
 
-@interface NekoUI : UIWindow <UIDocumentPickerDelegate, UIGestureRecognizerDelegate>
+@interface NekoUI : UIWindow <UIDocumentPickerDelegate>
+@property (nonatomic, strong) UIView *triggerView;
 @property (nonatomic, strong) UIView *mainContainer;
 @property (nonatomic, strong) UITextView *editor;
 @property (nonatomic, strong) UITextView *console;
@@ -40,7 +41,6 @@ int ExecuteScript(const char* code) {
 @property (nonatomic, strong) UIButton *chevronBtn;
 @property (nonatomic, strong) UIButton *execBtn;
 @property (nonatomic, strong) UIButton *sideExecBtn;
-@property (nonatomic, strong) UISwipeGestureRecognizer *edgeSwipe;
 @property (nonatomic, strong) UISwipeGestureRecognizer *anywhereSwipe;
 @property (nonatomic, assign) BOOL isFullScreen;
 @end
@@ -51,7 +51,7 @@ int ExecuteScript(const char* code) {
     self = [super initWithWindowScene:scene];
     if (self) {
         self.frame = [UIScreen mainScreen].bounds;
-        self.windowLevel = 999999; // Force on top of Roblox
+        self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
 
         g_themeColors = @[
@@ -62,18 +62,28 @@ int ExecuteScript(const char* code) {
         ];
         g_themeColor = g_themeColors[0];
 
-        // 1. Chevron (Hidden initially)
+        // 1. INVISIBLE TRIGGER AREA (Left side, wide)
+        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 150, 200, 600)];
+        self.triggerView.backgroundColor = [UIColor clearColor];
+        [self addSubview:self.triggerView];
+        
+        UISwipeGestureRecognizer *swipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleSwipe:)];
+        swipe.direction = UISwipeGestureRecognizerDirectionRight;
+        [self.triggerView addGestureRecognizer:swipe];
+
+        // 2. HUGE CHEVRON BUTTON
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        self.chevronBtn.frame = CGRectMake(0, 200, 40, 80);
+        self.chevronBtn.frame = CGRectMake(0, 250, 60, 150); // Wider and taller
         [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
-        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:30];
+        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:50];
         self.chevronBtn.backgroundColor = UI_BG_COLOR;
-        self.chevronBtn.layer.cornerRadius = 10;
+        self.chevronBtn.layer.cornerRadius = 15;
+        self.chevronBtn.layer.borderWidth = 2.0;
         [self.chevronBtn addTarget:self action:@selector(showUI) forControlEvents:UIControlEventTouchUpInside];
         self.chevronBtn.hidden = YES;
         [self addSubview:self.chevronBtn];
 
-        // 2. Main Floating UI Container
+        // 3. Main Floating UI Container
         self.mainContainer = [[UIView alloc] initWithFrame:CGRectMake(30, 100, 700, 480)];
         self.mainContainer.backgroundColor = UI_BG_COLOR;
         self.mainContainer.layer.cornerRadius = 24;
@@ -87,12 +97,11 @@ int ExecuteScript(const char* code) {
         self.titleLabel.font = [UIFont fontWithName:@"AvenirNext-Heavy" size:26];
         [self.mainContainer addSubview:self.titleLabel];
 
-        // Close Button (X)
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         closeBtn.frame = CGRectMake(700 - 50, 20, 30, 30);
         [closeBtn setTitle:@"✖" forState:UIControlStateNormal];
         [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
-        closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
+        closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
         [closeBtn addTarget:self action:@selector(hideUI) forControlEvents:UIControlEventTouchUpInside];
         [self.mainContainer addSubview:closeBtn];
 
@@ -207,37 +216,22 @@ int ExecuteScript(const char* code) {
         [resizeBtn addTarget:self action:@selector(toggleResize) forControlEvents:UIControlEventTouchUpInside];
         [bottomBar addSubview:resizeBtn];
 
-        // GESTURE 1: Swipe Right from the absolute left edge
-        self.edgeSwipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeSwipe:)];
-        self.edgeSwipe.direction = UISwipeGestureRecognizerDirectionRight;
-        self.edgeSwipe.delegate = self;
-        [self addGestureRecognizer:self.edgeSwipe];
-
         [self applyTheme];
     }
     return self;
 }
 
-// Only allow the edge swipe to start if it's on the left edge (x < 50)
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
-    if (gestureRecognizer == self.edgeSwipe) {
-        CGPoint location = [gestureRecognizer locationInView:self];
-        if (location.x > 50) return NO; 
-    }
-    return YES;
-}
-
-// Pass touches through the clear window so it doesn't block gameplay
+// Pass touches through the window, EXCEPT on the trigger area
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.mainContainer.hidden) {
         if (self.chevronBtn.hidden) {
-            // Catch touches ONLY on the left 50px to allow the edge swipe
-            if (point.x < 50) {
-                return [super hitTest:point withEvent:event];
+            // If the UI is closed, only the trigger area catches touches
+            if (CGRectContainsPoint(self.triggerView.frame, point)) {
+                return self.triggerView;
             }
-            return nil; // Let game handle it
+            return nil; // Let game handle everything else
         } else {
-            // Chevron is visible, catch all touches for the second swipe
+            // Chevron is visible, let touches hit the chevron
             return [super hitTest:point withEvent:event];
         }
     }
@@ -247,6 +241,7 @@ int ExecuteScript(const char* code) {
 - (void)applyTheme {
     self.mainContainer.layer.borderColor = g_themeColor.CGColor;
     [self.chevronBtn setTitleColor:g_themeColor forState:UIControlStateNormal];
+    self.chevronBtn.layer.borderColor = g_themeColor.CGColor;
     self.titleLabel.textColor = g_themeColor;
     self.execBtn.backgroundColor = g_themeColor;
     self.console.textColor = g_themeColor;
@@ -256,7 +251,7 @@ int ExecuteScript(const char* code) {
     if (sideLbl) sideLbl.textColor = g_themeColor;
 }
 
-- (void)handleEdgeSwipe:(UISwipeGestureRecognizer *)gesture {
+- (void)handleSwipe:(UISwipeGestureRecognizer *)gesture {
     if (self.mainContainer.hidden) {
         // Show chevron
         self.chevronBtn.hidden = NO;
@@ -265,34 +260,22 @@ int ExecuteScript(const char* code) {
         
         // Cancel any previous timer
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
-        // Hide chevron after 3 seconds if user doesn't swipe again
-        [self performSelector:@selector(resetChevron) withObject:nil afterDelay:3.0];
-        
-        // Activate the anywhere swipe
-        if (!self.anywhereSwipe) {
-            self.anywhereSwipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleAnywhereSwipe:)];
-            self.anywhereSwipe.direction = UISwipeGestureRecognizerDirectionRight;
-            [self addGestureRecognizer:self.anywhereSwipe];
-        }
+        [self performSelector:@selector(resetChevron) withObject:nil afterDelay:5.0]; // 5 seconds instead of 3
     }
 }
 
 - (void)resetChevron {
     if (self.mainContainer.hidden) {
-        self.chevronBtn.hidden = YES;
-        if (self.anywhereSwipe) {
-            [self removeGestureRecognizer:self.anywhereSwipe];
-            self.anywhereSwipe = nil;
-        }
+        [UIView animateWithDuration:0.2 animations:^{
+            self.chevronBtn.alpha = 0;
+        } completion:^(BOOL finished) {
+            self.chevronBtn.hidden = YES;
+        }];
     }
 }
 
-- (void)handleAnywhereSwipe:(UISwipeGestureRecognizer *)gesture {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
-    [self showUI];
-}
-
 - (void)showUI {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
     self.mainContainer.hidden = NO;
     self.chevronBtn.hidden = YES;
     
@@ -311,10 +294,6 @@ int ExecuteScript(const char* code) {
     } completion:^(BOOL finished) {
         self.mainContainer.hidden = YES;
         self.chevronBtn.hidden = YES;
-        if (self.anywhereSwipe) {
-            [self removeGestureRecognizer:self.anywhereSwipe];
-            self.anywhereSwipe = nil;
-        }
     }];
 }
 
