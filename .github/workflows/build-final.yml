@@ -38,17 +38,16 @@ jobs:
           
           cmake --build build -j --target Luau.VM Luau.Compiler
           
-          mkdir -p ../../vendor/luau/lib
-          mkdir -p ../../vendor/luau/include
+          # Extract object files instead of linking .a archives
+          mkdir -p ../../vendor/luau/extracted
+          cd ../../vendor/luau/extracted
+          ar x ../vendor/luau-src/build/libLuau.VM.a
+          ar x ../vendor/luau-src/build/libLuau.Compiler.a
+          cd ../../..
           
-          cp build/libLuau.VM.a ../../vendor/luau/lib/
-          cp build/libLuau.Compiler.a ../../vendor/luau/lib/
-          
-          ranlib ../../vendor/luau/lib/libLuau.VM.a
-          ranlib ../../vendor/luau/lib/libLuau.Compiler.a
-          
-          for d in $(find . -type d -name "include"); do
-            cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
+          mkdir -p vendor/luau/include
+          for d in $(find vendor/luau-src -type d -name "include"); do
+            cp -r $d/* vendor/luau/include/ 2>/dev/null || true
           done
 
       - name: Compile and Link Tweak
@@ -63,11 +62,12 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
+          # Link ALL extracted .o files directly
+          LUAU_OBJS=$(find vendor/luau/extracted -name "*.o" | tr '\n' ' ')
+          
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics \
-            Api.o Tweak.o \
-            vendor/luau/lib/libLuau.VM.a \
-            vendor/luau/lib/libLuau.Compiler.a \
+            Api.o Tweak.o $LUAU_OBJS \
             -o neko.dylib
 
       - name: Sign Dylib
@@ -78,7 +78,6 @@ jobs:
 
       - name: Download Roblox IPA
         run: |
-          # DOWNLOAD THE IPA DIRECTLY IN THE CLOUD
           curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
 
       - name: Inject Dylib into IPA
