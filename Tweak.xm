@@ -31,7 +31,7 @@ int ExecuteScript(const char* code) {
     return 0;
 }
 
-@interface NekoUI : UIWindow <UIDocumentPickerDelegate>
+@interface NekoUI : UIWindow <UIDocumentPickerDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UIView *mainContainer;
 @property (nonatomic, strong) UITextView *editor;
 @property (nonatomic, strong) UITextView *console;
@@ -40,6 +40,7 @@ int ExecuteScript(const char* code) {
 @property (nonatomic, strong) UIButton *chevronBtn;
 @property (nonatomic, strong) UIButton *execBtn;
 @property (nonatomic, strong) UIButton *sideExecBtn;
+@property (nonatomic, strong) UISwipeGestureRecognizer *edgeSwipe;
 @property (nonatomic, strong) UISwipeGestureRecognizer *anywhereSwipe;
 @property (nonatomic, assign) BOOL isFullScreen;
 @end
@@ -50,7 +51,7 @@ int ExecuteScript(const char* code) {
     self = [super initWithWindowScene:scene];
     if (self) {
         self.frame = [UIScreen mainScreen].bounds;
-        self.windowLevel = UIWindowLevelAlert + 1;
+        self.windowLevel = 999999; // Force on top of Roblox
         self.backgroundColor = [UIColor clearColor];
 
         g_themeColors = @[
@@ -207,23 +208,38 @@ int ExecuteScript(const char* code) {
         [bottomBar addSubview:resizeBtn];
 
         // GESTURE 1: Swipe Right from the absolute left edge
-        UIScreenEdgePanGestureRecognizer *edgeSwipe = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeSwipe:)];
-        edgeSwipe.edges = UIRectEdgeLeft;
-        [self addGestureRecognizer:edgeSwipe];
+        self.edgeSwipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeSwipe:)];
+        self.edgeSwipe.direction = UISwipeGestureRecognizerDirectionRight;
+        self.edgeSwipe.delegate = self;
+        [self addGestureRecognizer:self.edgeSwipe];
 
         [self applyTheme];
     }
     return self;
 }
 
+// Only allow the edge swipe to start if it's on the left edge (x < 50)
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if (gestureRecognizer == self.edgeSwipe) {
+        CGPoint location = [gestureRecognizer locationInView:self];
+        if (location.x > 50) return NO; 
+    }
+    return YES;
+}
+
 // Pass touches through the clear window so it doesn't block gameplay
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.mainContainer.hidden && self.chevronBtn.hidden) {
-        // If the UI is closed, ONLY the far-left 30 pixels should catch touches
-        if (point.x < 30) {
+    if (self.mainContainer.hidden) {
+        if (self.chevronBtn.hidden) {
+            // Catch touches ONLY on the left 50px to allow the edge swipe
+            if (point.x < 50) {
+                return [super hitTest:point withEvent:event];
+            }
+            return nil; // Let game handle it
+        } else {
+            // Chevron is visible, catch all touches for the second swipe
             return [super hitTest:point withEvent:event];
         }
-        return nil; // Let all other touches pass through to the game
     }
     return [super hitTest:point withEvent:event];
 }
@@ -240,25 +256,39 @@ int ExecuteScript(const char* code) {
     if (sideLbl) sideLbl.textColor = g_themeColor;
 }
 
-- (void)handleEdgeSwipe:(UIScreenEdgePanGestureRecognizer *)gesture {
-    if (gesture.state == UIGestureRecognizerStateEnded) {
-        if (self.mainContainer.hidden) {
-            // Show chevron
-            self.chevronBtn.hidden = NO;
-            self.chevronBtn.alpha = 0;
-            [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
-            
-            // Now activate the anywhere swipe
-            if (!self.anywhereSwipe) {
-                self.anywhereSwipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleAnywhereSwipe:)];
-                self.anywhereSwipe.direction = UISwipeGestureRecognizerDirectionRight;
-                [self addGestureRecognizer:self.anywhereSwipe];
-            }
+- (void)handleEdgeSwipe:(UISwipeGestureRecognizer *)gesture {
+    if (self.mainContainer.hidden) {
+        // Show chevron
+        self.chevronBtn.hidden = NO;
+        self.chevronBtn.alpha = 0;
+        [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
+        
+        // Cancel any previous timer
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
+        // Hide chevron after 3 seconds if user doesn't swipe again
+        [self performSelector:@selector(resetChevron) withObject:nil afterDelay:3.0];
+        
+        // Activate the anywhere swipe
+        if (!self.anywhereSwipe) {
+            self.anywhereSwipe = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(handleAnywhereSwipe:)];
+            self.anywhereSwipe.direction = UISwipeGestureRecognizerDirectionRight;
+            [self addGestureRecognizer:self.anywhereSwipe];
+        }
+    }
+}
+
+- (void)resetChevron {
+    if (self.mainContainer.hidden) {
+        self.chevronBtn.hidden = YES;
+        if (self.anywhereSwipe) {
+            [self removeGestureRecognizer:self.anywhereSwipe];
+            self.anywhereSwipe = nil;
         }
     }
 }
 
 - (void)handleAnywhereSwipe:(UISwipeGestureRecognizer *)gesture {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
     [self showUI];
 }
 
