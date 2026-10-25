@@ -39,7 +39,7 @@ jobs:
           # Build ONLY the VM and Compiler libraries
           cmake --build build -j --target Luau.VM Luau.Compiler
           
-          # Copy the compiled libraries and headers for the tweak
+          # Copy the compiled libraries and headers
           mkdir -p ../../vendor/luau/lib
           mkdir -p ../../vendor/luau/include
           
@@ -51,19 +51,24 @@ jobs:
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Compile Tweak and Link
+      - name: Index Static Libraries & Compile Tweak
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          
+          # FIX: Run ranlib to generate the archive index
+          ranlib vendor/luau/lib/libLuau.VM.a
+          ranlib vendor/luau/lib/libLuau.Compiler.a
           
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
+          # Use extern "C" for Lua headers to match C-linkage
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include -Ivendor/luau/include/Luau"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link against the CMake-built static libraries
+          # Link against the indexed static libraries
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics \
             Api.o Tweak.o \
