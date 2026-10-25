@@ -100,8 +100,8 @@ const char* HTML_UI = R"STR(
 
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, strong) UIView *triggerView;
 @property (nonatomic, strong) UIButton *chevronBtn;
+@property (nonatomic, strong) UIScreenEdgePanGestureRecognizer *edgeSwipe;
 @end
 
 @implementation NekoUI
@@ -113,29 +113,20 @@ const char* HTML_UI = R"STR(
         self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
 
-        // 1. Massive 100px Invisible Swipe Trigger Area
-        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, self.bounds.size.height)];
-        self.triggerView.backgroundColor = [UIColor clearColor];
-        [self addSubview:self.triggerView];
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.triggerView addGestureRecognizer:pan];
-
-        // 2. Huge Glowing Chevron Button
+        // Huge Glowing Chevron Button (Hidden initially)
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        self.chevronBtn.frame = CGRectMake(0, 300, 60, 120); 
+        self.chevronBtn.frame = CGRectMake(0, 300, 70, 120); 
         [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
-        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:45];
-        self.chevronBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.9];
+        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:50];
+        self.chevronBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.95];
         self.chevronBtn.layer.cornerRadius = 15;
-        self.chevronBtn.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner; // Only round the right side
-        self.chevronBtn.layer.borderWidth = 2.0;
+        self.chevronBtn.layer.borderWidth = 3.0;
         self.chevronBtn.layer.borderColor = [UIColor whiteColor].CGColor;
         [self.chevronBtn addTarget:self action:@selector(showUI) forControlEvents:UIControlEventTouchUpInside];
         self.chevronBtn.hidden = YES;
         [self addSubview:self.chevronBtn];
 
-        // 3. WebView
+        // WebView
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
@@ -148,11 +139,16 @@ const char* HTML_UI = R"STR(
         NSString *html = [NSString stringWithUTF8String:HTML_UI];
         [self.webView loadHTMLString:html baseURL:nil];
         [self addSubview:self.webView];
+
+        // Native iOS Edge Swipe (Specifically for the left edge)
+        self.edgeSwipe = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeSwipe:)];
+        self.edgeSwipe.edges = UIRectEdgeLeft;
+        [self addGestureRecognizer:self.edgeSwipe];
     }
     return self;
 }
 
-// Touch Logic: Only let the WebView, Chevron, or Trigger capture touches
+// CRITICAL FIX: Only intercept touches on the far left (x < 50). Everything else goes to Roblox.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.webView.hidden) {
         if (!self.chevronBtn.hidden) {
@@ -160,26 +156,24 @@ const char* HTML_UI = R"STR(
                 return self.chevronBtn;
             }
         }
-        if (CGRectContainsPoint(self.triggerView.frame, point)) {
-            return self.triggerView;
+        // Only catch the swipe if it starts on the far left 50 pixels
+        if (point.x < 50) {
+            return self; 
         }
-        return nil; // Pass everything else to Roblox
+        return nil; // Pass all other touches to Roblox
     }
     return [super hitTest:point withEvent:event];
 }
 
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+- (void)handleEdgeSwipe:(UIScreenEdgePanGestureRecognizer *)gesture {
     if (gesture.state == UIGestureRecognizerStateEnded) {
-        CGPoint translation = [gesture translationInView:self];
-        if (translation.x > 20) { // Swiped right
-            self.chevronBtn.hidden = NO;
-            self.chevronBtn.alpha = 0;
-            [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
-            
-            // Auto hide chevron after 5 seconds if they don't tap it
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
-            [self performSelector:@selector(hideChevron) withObject:nil afterDelay:5.0];
-        }
+        self.chevronBtn.hidden = NO;
+        self.chevronBtn.alpha = 0;
+        [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
+        
+        // Auto-hide chevron after 5 seconds
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
+        [self performSelector:@selector(hideChevron) withObject:nil afterDelay:5.0];
     }
 }
 
