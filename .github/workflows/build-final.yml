@@ -15,25 +15,35 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile Luau to Static Library
+      - name: Build Luau for iOS with CMake
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Compile everything
-          find . -name "*.cpp" | while read f; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "${f%.cpp}.o"
-          done
+          # Configure CMake for iOS
+          cmake -B build \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES="arm64" \
+            -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLUAU_BUILD_TESTS=OFF \
+            -DLUAU_BUILD_CLI=OFF \
+            -DLUAU_BUILD_WEB=OFF
           
-          # Create a giant static library so linker doesn't drop files
-          find . -name "*.o" | xargs ar rcs libLuau.a
+          # Build ONLY the VM and Compiler libraries
+          cmake --build build -j --target Luau.VM Luau.Compiler
           
-          # Copy headers
+          # Copy the compiled libraries and headers for the tweak
+          mkdir -p ../../vendor/luau/lib
+          mkdir -p ../../vendor/luau/include
+          
+          cp build/libLuau.VM.a ../../vendor/luau/lib/
+          cp build/libLuau.Compiler.a ../../vendor/luau/lib/
+          
+          # Copy all necessary headers
           for d in $(find . -type d -name "include"); do
-            mkdir -p ../../vendor/luau/include
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
@@ -44,16 +54,17 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link using the static library
+          # Link against the CMake-built static libraries
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics \
             Api.o Tweak.o \
-            vendor/luau-src/libLuau.a \
+            vendor/luau/lib/libLuau.VM.a \
+            vendor/luau/lib/libLuau.Compiler.a \
             -o neko.dylib
 
       - name: Sign Dylib
