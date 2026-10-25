@@ -98,10 +98,10 @@ const char* HTML_UI = R"STR(
 </html>
 )STR";
 
-@interface NekoUI : UIWindow <WKScriptMessageHandler>
+@interface NekoUI : UIWindow <WKScriptMessageHandler, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) UIButton *chevronBtn;
-@property (nonatomic, strong) UIScreenEdgePanGestureRecognizer *edgeSwipe;
+@property (nonatomic, strong) UIPanGestureRecognizer *leftSwipe;
 @end
 
 @implementation NekoUI
@@ -113,7 +113,7 @@ const char* HTML_UI = R"STR(
         self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
 
-        // Huge Glowing Chevron Button (Hidden initially)
+        // Huge Glowing Chevron Button
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         self.chevronBtn.frame = CGRectMake(0, 300, 70, 120); 
         [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
@@ -140,40 +140,45 @@ const char* HTML_UI = R"STR(
         [self.webView loadHTMLString:html baseURL:nil];
         [self addSubview:self.webView];
 
-        // Native iOS Edge Swipe (Specifically for the left edge)
-        self.edgeSwipe = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeSwipe:)];
-        self.edgeSwipe.edges = UIRectEdgeLeft;
-        [self addGestureRecognizer:self.edgeSwipe];
+        // Custom Pan Gesture for the left half of the screen
+        self.leftSwipe = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        self.leftSwipe.delegate = self;
+        self.leftSwipe.cancelsTouchesInView = NO; // Allows Roblox to still receive touches
+        [self addGestureRecognizer:self.leftSwipe];
     }
     return self;
 }
 
-// CRITICAL FIX: Only intercept touches on the far left (x < 50). Everything else goes to Roblox.
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.webView.hidden) {
-        if (!self.chevronBtn.hidden) {
-            if (CGRectContainsPoint(self.chevronBtn.frame, point)) {
-                return self.chevronBtn;
-            }
+// Only allow the gesture to start if it's on the LEFT half of the screen
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if (gestureRecognizer == self.leftSwipe) {
+        CGPoint location = [gestureRecognizer locationInView:self];
+        CGPoint velocity = [(UIPanGestureRecognizer *)gestureRecognizer velocityInView:self];
+        
+        // Must start on the left half of the screen
+        if (location.x > self.bounds.size.width / 2) {
+            return NO;
         }
-        // Only catch the swipe if it starts on the far left 50 pixels
-        if (point.x < 50) {
-            return self; 
+        // Must be a horizontal swipe (moving right)
+        if (fabs(velocity.y) > fabs(velocity.x)) {
+            return NO;
         }
-        return nil; // Pass all other touches to Roblox
     }
-    return [super hitTest:point withEvent:event];
+    return YES;
 }
 
-- (void)handleEdgeSwipe:(UIScreenEdgePanGestureRecognizer *)gesture {
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
     if (gesture.state == UIGestureRecognizerStateEnded) {
-        self.chevronBtn.hidden = NO;
-        self.chevronBtn.alpha = 0;
-        [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
-        
-        // Auto-hide chevron after 5 seconds
-        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
-        [self performSelector:@selector(hideChevron) withObject:nil afterDelay:5.0];
+        CGPoint translation = [gesture translationInView:self];
+        if (translation.x > 30) { // Swiped Right
+            self.chevronBtn.hidden = NO;
+            self.chevronBtn.alpha = 0;
+            [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
+            
+            // Auto hide after 5 seconds
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideChevron) object:nil];
+            [self performSelector:@selector(hideChevron) withObject:nil afterDelay:5.0];
+        }
     }
 }
 
@@ -183,6 +188,20 @@ const char* HTML_UI = R"STR(
     } completion:^(BOOL finished) {
         self.chevronBtn.hidden = YES;
     }];
+}
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // If the UI is closed, DO NOT block touches to Roblox.
+    if (self.webView.hidden) {
+        if (!self.chevronBtn.hidden) {
+            // Only block the chevron button
+            if (CGRectContainsPoint(self.chevronBtn.frame, point)) {
+                return self.chevronBtn;
+            }
+        }
+        return nil; // Passes to Roblox
+    }
+    return [super hitTest:point withEvent:event];
 }
 
 - (void)showUI {
