@@ -34,6 +34,9 @@ const char* HTML_UI = R"STR(
     .window { width: 700px; height: 480px; background: rgba(15, 15, 20, 0.95); border-radius: 0 20px 20px 0; border: 2px solid #bf5af2; border-left: none; display: flex; flex-direction: column; box-shadow: 10px 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(10px); }
     .header { height: 50px; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
     .title { color: #bf5af2; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
+    .header-right { display: flex; align-items: center; gap: 15px; }
+    .toggle-container { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 12px; }
+    .toggle-container input { cursor: pointer; }
     .close { color: #ff453a; font-size: 24px; cursor: pointer; padding: 5px; font-weight: bold; }
     .content { display: flex; flex: 1; padding: 15px; gap: 15px; }
     .left-panel { flex: 2; display: flex; flex-direction: column; gap: 15px; }
@@ -46,13 +49,34 @@ const char* HTML_UI = R"STR(
 </head>
 <body>
     <div class="window">
-        <div class="header"><div class="title">NEKO</div><div class="close" onclick="closeUI()">X</div></div>
+        <div class="header">
+            <div class="title">NEKO</div>
+            <div class="header-right">
+                <div class="toggle-container">
+                    <input type="checkbox" id="autoShowToggle" onchange="toggleAutoShow()">
+                    <label for="autoShowToggle">Auto-Open</label>
+                </div>
+                <div class="close" onclick="closeUI()">X</div>
+            </div>
+        </div>
         <div class="content">
             <div class="left-panel"><textarea id="script" placeholder="-- Paste script"></textarea><button class="execute-btn" onclick="executeScript()">EXECUTE</button></div>
             <div class="right-panel"><div class="console" id="console">[Neko] Loaded.<br></div></div>
         </div>
     </div>
     <script>
+        // Ask Objective-C for the current setting on load
+        window.onload = function() {
+            window.webkit.messageHandlers.nekoHandler.postMessage("GET_AUTO_OPEN");
+        };
+        
+        function setToggleState(isChecked) {
+            document.getElementById('autoShowToggle').checked = isChecked;
+        }
+
+        function toggleAutoShow() {
+            window.webkit.messageHandlers.nekoHandler.postMessage("TOGGLE_AUTO_OPEN");
+        }
         function executeScript() { var code = document.getElementById('script').value; if(!code) return; document.getElementById('console').innerHTML += "> Executing...<br>"; window.webkit.messageHandlers.nekoHandler.postMessage(code); }
         function closeUI() { window.webkit.messageHandlers.nekoHandler.postMessage("HIDE_UI"); }
         function logMsg(msg) { document.getElementById('console').innerHTML += msg + "<br>"; }
@@ -63,8 +87,7 @@ const char* HTML_UI = R"STR(
 
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, strong) UIView *edgeTrigger;
-@property (nonatomic, strong) UIButton *chevronBtn;
+@property (nonatomic, strong) UIView *dragHandle;
 @property (nonatomic, assign) BOOL isUIDraggedOut;
 @end
 
@@ -78,7 +101,6 @@ const char* HTML_UI = R"STR(
         self.backgroundColor = [UIColor clearColor];
         self.isUIDraggedOut = NO;
 
-        // 1. WebView (Starts hidden off-screen left)
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
@@ -91,52 +113,44 @@ const char* HTML_UI = R"STR(
         [self.webView loadHTMLString:html baseURL:nil];
         [self addSubview:self.webView];
 
-        // 2. Edge Trigger (Only the first 30 pixels to keep joystick safe)
-        self.edgeTrigger = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 30, self.bounds.size.height)];
-        self.edgeTrigger.backgroundColor = [UIColor clearColor];
-        [self addSubview:self.edgeTrigger];
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        pan.cancelsTouchesInView = NO; // Allow simultaneous touches (like joystick if it reaches the edge)
-        [self.edgeTrigger addGestureRecognizer:pan];
+        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, 350, 25, 100)];
+        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.9];
+        self.dragHandle.layer.cornerRadius = 12;
+        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
+        self.dragHandle.layer.borderWidth = 2.0;
+        self.dragHandle.layer.borderColor = [UIColor whiteColor].CGColor;
+        [self addSubview:self.dragHandle];
 
-        // 3. Chevron (Starts on the edge)
-        self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        self.chevronBtn.frame = CGRectMake(0, 300, 50, 120); 
-        [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
-        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:40];
-        self.chevronBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.95];
-        self.chevronBtn.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
-        self.chevronBtn.layer.cornerRadius = 15;
-        self.chevronBtn.layer.borderWidth = 2.0;
-        self.chevronBtn.layer.borderColor = [UIColor whiteColor].CGColor;
-        [self.chevronBtn addTarget:self action:@selector(openUIFully) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:self.chevronBtn];
+        UIView *line1 = [[UIView alloc] initWithFrame:CGRectMake(8, 40, 9, 2)];
+        line1.backgroundColor = [UIColor whiteColor];
+        line1.alpha = 0.5;
+        [self.dragHandle addSubview:line1];
+        UIView *line2 = [[UIView alloc] initWithFrame:CGRectMake(8, 50, 9, 2)];
+        line2.backgroundColor = [UIColor whiteColor];
+        line2.alpha = 0.5;
+        [self.dragHandle addSubview:line2];
+        UIView *line3 = [[UIView alloc] initWithFrame:CGRectMake(8, 60, 9, 2)];
+        line3.backgroundColor = [UIColor whiteColor];
+        line3.alpha = 0.5;
+        [self.dragHandle addSubview:line3];
+
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.dragHandle addGestureRecognizer:pan];
     }
     return self;
 }
 
-// Touch Logic: Pass everything to Roblox except the edge trigger and the open UI
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // If UI is fully open, let the WebView handle touches
     if (self.webView.frame.origin.x == 0) {
         return [super hitTest:point withEvent:event];
     }
-    
-    // If UI is sliding, catch the touches so the drag continues
     if (self.webView.frame.origin.x > -700 && self.webView.frame.origin.x < 0) {
         return self;
     }
-
-    // If UI is closed: allow touches on chevron or edge trigger, pass everything else to Roblox
-    if (CGRectContainsPoint(self.chevronBtn.frame, point)) {
-        return self.chevronBtn;
+    if (!self.dragHandle.hidden && CGRectContainsPoint(self.dragHandle.frame, point)) {
+        return self.dragHandle;
     }
-    if (CGRectContainsPoint(self.edgeTrigger.frame, point)) {
-        return self.edgeTrigger;
-    }
-    
-    return nil; // Pass joystick and camera touches to the game
+    return nil;
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
@@ -147,19 +161,12 @@ const char* HTML_UI = R"STR(
     if (gesture.state == UIGestureRecognizerStateChanged) {
         if (newX > 0) newX = 0;
         if (newX < -700) newX = -700;
-        
-        // Slide the UI
         self.webView.frame = CGRectMake(newX, 100, 700, 480);
-        // Keep chevron attached to the edge of the sliding UI
-        self.chevronBtn.frame = CGRectMake(newX + 700, 300, 50, 120);
+        self.dragHandle.frame = CGRectMake(newX + 700, 350, 25, 100);
     } 
     else if (gesture.state == UIGestureRecognizerStateEnded) {
-        // Snap open if dragged past halfway, otherwise snap closed
-        if (newX > -350) {
-            [self openUIFully];
-        } else {
-            [self closeUIFully];
-        }
+        if (newX > -350) [self openUIFully];
+        else [self closeUIFully];
     }
 }
 
@@ -167,21 +174,41 @@ const char* HTML_UI = R"STR(
     self.isUIDraggedOut = YES;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.webView.frame = CGRectMake(0, 100, 700, 480);
-        self.chevronBtn.frame = CGRectMake(700, 300, 50, 120); // Hide chevron off right
-    } completion:nil];
+        self.dragHandle.frame = CGRectMake(700, 350, 25, 100);
+    } completion:^(BOOL finished) {
+        self.dragHandle.hidden = YES;
+    }];
 }
 
 - (void)closeUIFully {
     self.isUIDraggedOut = NO;
+    self.dragHandle.hidden = NO;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.webView.frame = CGRectMake(-700, 100, 700, 480);
-        self.chevronBtn.frame = CGRectMake(0, 300, 50, 120); // Bring chevron to edge
+        self.dragHandle.frame = CGRectMake(0, 350, 25, 100);
     } completion:nil];
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.body isKindOfClass:[NSString class]]) return;
     NSString *body = message.body;
+    
+    // --- Settings Logic ---
+    if ([body isEqualToString:@"GET_AUTO_OPEN"]) {
+        BOOL isAutoOpen = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
+        if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) isAutoOpen = YES; // Default to true
+        
+        NSString *js = [NSString stringWithFormat:@"setToggleState(%@);", isAutoOpen ? @"true" : @"false"];
+        [self.webView evaluateJavaScript:js completionHandler:nil];
+        return;
+    }
+    
+    if ([body isEqualToString:@"TOGGLE_AUTO_OPEN"]) {
+        BOOL current = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
+        if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) current = YES;
+        [[NSUserDefaults standardUserDefaults] setBool:!current forKey:@"NekoAutoOpen"];
+        return;
+    }
     
     if ([body isEqualToString:@"HIDE_UI"]) {
         [self closeUIFully];
@@ -233,6 +260,17 @@ __attribute__((constructor)) static void init() {
                 g_ui = [[NekoUI alloc] initWithScene:activeScene];
                 g_ui.rootViewController = [[UIViewController alloc] init];
                 [g_ui makeKeyAndVisible];
+                
+                // --- Auto-Open Logic ---
+                BOOL isAutoOpen = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
+                if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) isAutoOpen = YES;
+                
+                if (isAutoOpen) {
+                    // Wait 2.5 seconds for the game to load, then slide the UI out
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        [g_ui openUIFully];
+                    });
+                }
             }
         });
     });
