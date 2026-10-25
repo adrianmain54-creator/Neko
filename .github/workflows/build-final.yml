@@ -1,4 +1,4 @@
-name: Build Neko IPA
+name: Build Neko Dylib
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -9,8 +9,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip unzip python3 python3-pip
-          pip3 install lief
+          sudo apt-get install -y make git curl clang lld cmake zip
 
       - name: Download SDK
         run: |
@@ -74,34 +73,10 @@ jobs:
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
-
-      - name: Download Roblox IPA
-        run: |
-          # YOU MUST PUT YOUR IPA LINK HERE IF THIS ONE FAILS
-          curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
-
-      - name: Inject Dylib into IPA
-        run: |
-          mkdir extract
-          unzip roblox.ipa -d extract
-          
-          cp neko.dylib extract/Payload/Roblox.app/
-          
-          python3 -c "
-          import lief
-          bin_path = 'extract/Payload/Roblox.app/Roblox'
-          binary = lief.parse(bin_path)
-          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
-          binary.add(dylib_cmd)
-          binary.write(bin_path)
-          "
-          
-          cd extract
-          zip -qry ../Neko-Roblox.ipa Payload
-          cd ..
+          zip neko-dylib.zip neko.dylib
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Neko-Roblox-IPA
-          path: Neko-Roblox.ipa
+          name: neko-dylib
+          path: neko-dylib.zip
