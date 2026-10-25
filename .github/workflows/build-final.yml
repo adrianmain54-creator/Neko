@@ -23,11 +23,10 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Force C-linkage for all Luau functions
           for module in VM Compiler Ast Common Analysis; do
             mkdir -p "build_$module"
             for f in $module/src/*.cpp; do
-              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -DLUA_EXTERN_C_BEGIN='extern "C" {' -DLUA_EXTERN_C_END='}' -c "$f" -o "build_$module/$(basename $f).o"
+              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_$module/$(basename $f).o"
             done
           done
           
@@ -50,7 +49,6 @@ jobs:
           
           LUAU_OBJS=$(find vendor/luau-src -name "*.o" | tr '\n' ' ')
           
-          # Link with all_load to force inclusion
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -Wl,-all_load \
             -framework Foundation -framework UIKit \
