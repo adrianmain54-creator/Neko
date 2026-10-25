@@ -41,7 +41,6 @@ int ExecuteScript(const char* code) {
 @property (nonatomic, strong) UIButton *chevronBtn;
 @property (nonatomic, strong) UIButton *execBtn;
 @property (nonatomic, strong) UIButton *sideExecBtn;
-@property (nonatomic, strong) UISwipeGestureRecognizer *anywhereSwipe;
 @property (nonatomic, assign) BOOL isFullScreen;
 @end
 
@@ -62,8 +61,8 @@ int ExecuteScript(const char* code) {
         ];
         g_themeColor = g_themeColors[0];
 
-        // 1. INVISIBLE TRIGGER AREA (Left side, wide)
-        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 150, 200, 600)];
+        // 1. Invisible Trigger Area (Just 30px wide on the far left)
+        self.triggerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 30, self.bounds.size.height)];
         self.triggerView.backgroundColor = [UIColor clearColor];
         [self addSubview:self.triggerView];
         
@@ -71,13 +70,13 @@ int ExecuteScript(const char* code) {
         swipe.direction = UISwipeGestureRecognizerDirectionRight;
         [self.triggerView addGestureRecognizer:swipe];
 
-        // 2. HUGE CHEVRON BUTTON
+        // 2. Sleek Glowing Chevron (Moved to middle-left, away from menus)
         self.chevronBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        self.chevronBtn.frame = CGRectMake(0, 250, 60, 150); // Wider and taller
+        self.chevronBtn.frame = CGRectMake(-5, 350, 35, 100); 
         [self.chevronBtn setTitle:@">" forState:UIControlStateNormal];
-        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:50];
-        self.chevronBtn.backgroundColor = UI_BG_COLOR;
-        self.chevronBtn.layer.cornerRadius = 15;
+        self.chevronBtn.titleLabel.font = [UIFont boldSystemFontOfSize:36];
+        self.chevronBtn.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.8];
+        self.chevronBtn.layer.cornerRadius = 17.5;
         self.chevronBtn.layer.borderWidth = 2.0;
         [self.chevronBtn addTarget:self action:@selector(showUI) forControlEvents:UIControlEventTouchUpInside];
         self.chevronBtn.hidden = YES;
@@ -221,20 +220,25 @@ int ExecuteScript(const char* code) {
     return self;
 }
 
-// Pass touches through the window, EXCEPT on the trigger area
+// CRITICAL FIX: This allows you to move in Roblox while the menu is closed!
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.mainContainer.hidden) {
-        if (self.chevronBtn.hidden) {
-            // If the UI is closed, only the trigger area catches touches
+        if (!self.chevronBtn.hidden) {
+            // If chevron is visible, ONLY the chevron is clickable
+            CGPoint chevronPoint = [self.chevronBtn convertPoint:point fromView:self];
+            if ([self.chevronBtn pointInside:chevronPoint withEvent:event]) {
+                return self.chevronBtn;
+            }
+        } else {
+            // If chevron is hidden, ONLY the 30px left edge is swipeable
             if (CGRectContainsPoint(self.triggerView.frame, point)) {
                 return self.triggerView;
             }
-            return nil; // Let game handle everything else
-        } else {
-            // Chevron is visible, let touches hit the chevron
-            return [super hitTest:point withEvent:event];
         }
+        // Everything else passes through to Roblox
+        return nil; 
     }
+    // If UI is open, interact normally
     return [super hitTest:point withEvent:event];
 }
 
@@ -258,9 +262,8 @@ int ExecuteScript(const char* code) {
         self.chevronBtn.alpha = 0;
         [UIView animateWithDuration:0.2 animations:^{ self.chevronBtn.alpha = 1; }];
         
-        // Cancel any previous timer
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
-        [self performSelector:@selector(resetChevron) withObject:nil afterDelay:5.0]; // 5 seconds instead of 3
+        [self performSelector:@selector(resetChevron) withObject:nil afterDelay:5.0]; 
     }
 }
 
@@ -276,20 +279,21 @@ int ExecuteScript(const char* code) {
 
 - (void)showUI {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(resetChevron) object:nil];
+    
     self.mainContainer.hidden = NO;
     self.chevronBtn.hidden = YES;
     
-    self.mainContainer.transform = CGAffineTransformMakeScale(0.8, 0.8);
+    self.mainContainer.transform = CGAffineTransformMakeScale(0.9, 0.9);
     self.mainContainer.alpha = 0;
     
-    [UIView animateWithDuration:0.5 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+    [UIView animateWithDuration:0.3 animations:^{
         self.mainContainer.transform = CGAffineTransformIdentity;
         self.mainContainer.alpha = 1;
-    } completion:nil];
+    }];
 }
 
 - (void)hideUI {
-    [UIView animateWithDuration:0.3 animations:^{
+    [UIView animateWithDuration:0.2 animations:^{
         self.mainContainer.alpha = 0;
     } completion:^(BOOL finished) {
         self.mainContainer.hidden = YES;
