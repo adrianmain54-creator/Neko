@@ -1,4 +1,4 @@
-name: Build Neko Dylib
+name: Build Neko IPA
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -9,7 +9,8 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip
+          sudo apt-get install -y make git curl clang lld cmake zip unzip python3 python3-pip
+          pip3 install lief
 
       - name: Download SDK
         run: |
@@ -37,6 +38,7 @@ jobs:
           
           cmake --build build -j --target Luau.VM Luau.Compiler
           
+          # Extract all compiled .o files directly to avoid .a index issues
           mkdir -p $GITHUB_WORKSPACE/vendor/luau/extracted
           cd $GITHUB_WORKSPACE/vendor/luau/extracted
           find $GITHUB_WORKSPACE/vendor/luau-src/build -name "*.a" -exec ar x {} \;
@@ -47,7 +49,7 @@ jobs:
             cp -r $d/* vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Compile and Link Tweak
+      - name: Compile Tweak and Link
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
@@ -59,10 +61,11 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
+          # Link ALL extracted .o files directly, including WebKit for the HTML UI
           LUAU_OBJS=$(find vendor/luau/extracted -name "*.o" | tr '\n' ' ')
           
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
-            -framework Foundation -framework UIKit -framework CoreGraphics \
+            -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
             Api.o Tweak.o $LUAU_OBJS \
             -o neko.dylib
 
@@ -71,10 +74,34 @@ jobs:
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
-          zip neko-dylib.zip neko.dylib
+
+      - name: Download Roblox IPA
+        run: |
+          # YOU MUST PUT YOUR IPA LINK HERE IF THIS ONE FAILS
+          curl -L -o roblox.ipa "https://archive.org/download/roblox-ipa/Roblox.ipa"
+
+      - name: Inject Dylib into IPA
+        run: |
+          mkdir extract
+          unzip roblox.ipa -d extract
+          
+          cp neko.dylib extract/Payload/Roblox.app/
+          
+          python3 -c "
+          import lief
+          bin_path = 'extract/Payload/Roblox.app/Roblox'
+          binary = lief.parse(bin_path)
+          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/neko.dylib')
+          binary.add(dylib_cmd)
+          binary.write(bin_path)
+          "
+          
+          cd extract
+          zip -qry ../Neko-Roblox.ipa Payload
+          cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neko-dylib
-          path: neko-dylib.zip
+          name: Neko-Roblox-IPA
+          path: Neko-Roblox.ipa
