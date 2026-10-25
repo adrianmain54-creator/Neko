@@ -1,4 +1,4 @@
-name: Build Neko Pure
+name: Build Neko IPA
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -9,71 +9,58 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake libplist-dev fakeroot libssl-dev libtinfo6 zip
+          sudo apt-get install -y make git curl clang lld libplist-dev fakeroot libssl-dev libtinfo6 zip python3 python3-pip
+          pip3 install pyinstaller
 
       - name: Download SDK
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Build Luau for iOS with CMake
+      - name: Compile Luau Directly
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
           
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
+          INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Configure CMake for iOS using CLANG
-          cmake -B build \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_ARCHITECTURES="arm64" \
-            -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
-            -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DLUAU_BUILD_TESTS=OFF \
-            -DLUAU_BUILD_CLI=OFF \
-            -DLUAU_BUILD_WEB=OFF
+          # Compile necessary modules manually
+          mkdir -p build_all
+          for module in VM Compiler Ast Common; do
+            for f in $module/src/*.cpp; do
+              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_all/$(basename $f).o" || true
+            done
+          done
           
-          # Build ONLY the VM and Compiler libraries
-          cmake --build build -j --target Luau.VM Luau.Compiler
+          # Fix the FFlag error manually
+          cat << 'EOF' > Flags.cpp
+          #include "Luau/Common.h"
+          LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
+          EOF
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c Flags.cpp -o build_all/Flags.o
           
-          # Copy the compiled libraries and headers
-          mkdir -p ../../vendor/luau/lib
+          # Copy headers
           mkdir -p ../../vendor/luau/include
-          
-          cp build/libLuau.VM.a ../../vendor/luau/lib/
-          cp build/libLuau.Compiler.a ../../vendor/luau/lib/
-          
-          # Copy all necessary headers
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
 
-      - name: Index Static Libraries & Compile Tweak
+      - name: Compile Dylib and Link
         run: |
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
-          
-          # FIX: Run ranlib to generate the archive index
-          ranlib vendor/luau/lib/libLuau.VM.a
-          ranlib vendor/luau/lib/libLuau.Compiler.a
           
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          # Use extern "C" for Lua headers to match C-linkage
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include -Ivendor/luau/include/Luau"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link against the indexed static libraries
+          # Link EVERYTHING into one dylib
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics \
-            Api.o Tweak.o \
-            vendor/luau/lib/libLuau.VM.a \
-            vendor/luau/lib/libLuau.Compiler.a \
+            Api.o Tweak.o vendor/luau-src/build_all/*.o \
             -o neko.dylib
 
       - name: Sign Dylib
@@ -81,10 +68,20 @@ jobs:
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
           ./ldid_linux_x86_64 -S neko.dylib
-          zip neko-dylib-final.zip neko.dylib
 
-      - name: Upload Artifact
+      - name: Prepare IPA Injection (Azule)
+        run: |
+          # Download a pre-built Azule binary or script to inject dylib
+          curl -LO https://github.com/AloneMonkey/frida-ios-dump/archive/refs/heads/master.zip
+          # (Note: We will use a python script called azule to inject)
+          pip3 install requests
+          git clone https://github.com/0x41c/azule.git
+          python3 azule/azule -i "YOUR_ROBLOX_IPA_URL_HERE" -o "neko_payload.ipa" -f "neko.dylib"
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: neko-dylib-final
-          path: neko-dylib-final.zip
+          name: Neko-Executor-Files
+          path: |
+            neko.dylib
+            neko_payload.ipa
