@@ -40,12 +40,10 @@ int ExecuteScript(const char* code) {
         self.backgroundColor = [UIColor clearColor];
         self.isOpen = NO;
 
-        // 1. The Main Sliding Drawer (Starts off-screen)
         self.mainContainer = [[UIView alloc] initWithFrame:CGRectMake(-800, 0, 800, self.bounds.size.height)];
         self.mainContainer.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0];
         [self addSubview:self.mainContainer];
 
-        // --- SIDEBAR ---
         UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 90, self.bounds.size.height)];
         sidebar.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         [self.mainContainer addSubview:sidebar];
@@ -77,7 +75,6 @@ int ExecuteScript(const char* code) {
             [sidebar addSubview:navItem];
         }
 
-        // --- EDITOR PANEL ---
         UIView *editorWrapper = [[UIView alloc] initWithFrame:CGRectMake(110, 20, 420, self.bounds.size.height - 40)];
         editorWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         editorWrapper.layer.cornerRadius = 12;
@@ -104,7 +101,6 @@ int ExecuteScript(const char* code) {
         [execBtn addTarget:self action:@selector(execute) forControlEvents:UIControlEventTouchUpInside];
         [editorWrapper addSubview:execBtn];
 
-        // --- CONSOLE PANEL ---
         UIView *consoleWrapper = [[UIView alloc] initWithFrame:CGRectMake(545, 20, 240, self.bounds.size.height - 40)];
         consoleWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         consoleWrapper.layer.cornerRadius = 12;
@@ -126,7 +122,6 @@ int ExecuteScript(const char* code) {
         self.console.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
         [consoleWrapper addSubview:self.console];
 
-        // 2. The Purple Drag Handle
         self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150)];
         self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
         self.dragHandle.layer.cornerRadius = 22.5;
@@ -143,24 +138,21 @@ int ExecuteScript(const char* code) {
         [self.dragHandle addSubview:chevron];
         [self addSubview:self.dragHandle];
 
-        // 3. Native Drag Gesture
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.dragHandle addGestureRecognizer:pan];
     }
     return self;
 }
 
-// FIXED TOUCH LOGIC
+// THE TOUCH FIX
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.isOpen) {
-        // When closed, ONLY the drag handle is clickable. 
-        // Everything else (joystick) passes straight to Roblox.
         if (CGRectContainsPoint(self.dragHandle.frame, point)) {
             return self.dragHandle;
         }
         return nil; 
     }
-    // When open, the UI is fully interactive so you can type and click.
+    // When open, we want the touches to go to our UI!
     return [super hitTest:point withEvent:event];
 }
 
@@ -222,7 +214,13 @@ __attribute__((constructor)) static void init() {
         }
         if (activeScene) {
             g_ui = [[NekoUI alloc] initWithScene:activeScene];
-            g_ui.rootViewController = [[UIViewController alloc] init];
+            
+            // THE FIX: Create a root view controller and disable interaction on its view
+            UIViewController *rootVC = [[UIViewController alloc] init];
+            rootVC.view.backgroundColor = [UIColor clearColor];
+            rootVC.view.userInteractionEnabled = NO; // This stops it from swallowing touches!
+            
+            g_ui.rootViewController = rootVC;
             [g_ui makeKeyAndVisible];
         }
     });
