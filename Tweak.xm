@@ -23,41 +23,17 @@ int ExecuteScript(const char* code) {
     return 0;
 }
 
+// Your exact UI design, minus the scrolling logic
 const char* HTML_UI = R"STR(
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Swipe UI</title>
 <style>
 :root{--bg:#17181b;--panel:#1c1c1e;--ink:#f1f1f3;--mute:#9a9aa2;--line:#bf5af2}
 html,body{height:100%;margin:0;overflow:hidden;background:transparent;color:var(--ink);
-font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;overscroll-behavior:none}
-
-.main{position:fixed;inset:0;z-index:0;display:flex;align-items:center;justify-content:center;
-text-align:center;padding:24px;color:var(--mute);pointer-events:none;}
-
-.track{position:fixed;inset:0;z-index:1;display:flex;direction:rtl;overflow-x:auto;overflow-y:hidden;
-scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior:none;
--webkit-overflow-scrolling:touch;scrollbar-width:none}
-.track::-webkit-scrollbar{display:none}
-.track>*{flex:none;direction:ltr;height:100%;box-sizing:border-box}
-
-.spacer{width:100vw;scroll-snap-align:start;scroll-snap-stop:always}
-
-.peek{width:3px;position:relative;scroll-snap-align:end;scroll-snap-stop:always}
-
-.full{width:100vw;background:var(--panel);scroll-snap-align:start;scroll-snap-stop:always}
-
-.handle{position:absolute;left:0;top:50%;width:46px;height:150px;margin-top:-75px;box-sizing:border-box;
-background:linear-gradient(160deg,#bf5af2 0%,#8a2be2 50%,#6a0dad 100%);border-radius:0 80px 80px 0/0 75px 75px 0;
-box-shadow:0 8px 22px rgba(191,90,242,.45),0 2px 6px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.5),inset -3px 0 8px rgba(255,255,255,.14);
-display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;transition:transform .15s}
-.handle:active{transform:scale(.94)}
-.handle svg{width:24px;height:24px;margin-left:-2px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3));animation:nudge 1.8s ease-in-out infinite}
-@keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
-@media (prefers-reduced-motion:reduce){.handle svg{animation:none}}
+font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;overscroll-behavior:none;user-select:none;}
 
 /* NEKO UI CSS */
 .neko-container { display: flex; width: 100%; height: 100%; background: #17181b; color: #fff; }
@@ -77,20 +53,6 @@ display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-col
 </style>
 </head>
 <body>
-
-<div class="main"></div>
-
-<div class="track">
-  <section class="spacer"></section>
-
-  <section class="peek">
-    <a class="handle" href="#full" aria-label="Open full screen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5 16.5 12 9 19.5"/></svg>
-    </a>
-  </section>
-
-  <section class="full" id="full">
-    <!-- YOUR NEKO UI GOES HERE -->
     <div class="neko-container">
         <div class="neko-sidebar">
             <div class="neko-logo">NEKO</div>
@@ -112,37 +74,24 @@ display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-col
             </div>
         </div>
     </div>
-  </section>
-</div>
-
-<script>
-    function executeScript() {
-        var code = document.getElementById('script').value;
-        if(!code) return;
-        document.getElementById('console').innerHTML += "> Executing...<br>";
-        window.webkit.messageHandlers.nekoHandler.postMessage(code);
-    }
-    function logMsg(msg) {
-        document.getElementById('console').innerHTML += msg + "<br>";
-    }
-    
-    // Detect when the user swipes the track to open/close
-    var track = document.querySelector('.track');
-    track.addEventListener('scroll', function() {
-        // If we scrolled past the spacer, the UI is open
-        if (track.scrollLeft < 0) {
-            window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_OPEN");
-        } else {
-            window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_CLOSED");
+    <script>
+        function executeScript() {
+            var code = document.getElementById('script').value;
+            if(!code) return;
+            document.getElementById('console').innerHTML += "> Executing...<br>";
+            window.webkit.messageHandlers.nekoHandler.postMessage(code);
         }
-    });
-</script>
+        function logMsg(msg) {
+            document.getElementById('console').innerHTML += msg + "<br>";
+        }
+    </script>
 </body>
 </html>
 )STR";
 
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
+@property (nonatomic, strong) UIView *dragHandle;
 @property (nonatomic, assign) BOOL isOpen;
 @end
 
@@ -156,50 +105,89 @@ display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-col
         self.backgroundColor = [UIColor clearColor];
         self.isOpen = NO;
 
+        // 1. The WebView (Starts off-screen to the left)
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
-        self.webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:config];
-        self.webView.backgroundColor = [UIColor clearColor];
+        self.webView = [[WKWebView alloc] initWithFrame:CGRectMake(-700, 0, 700, self.bounds.size.height) configuration:config];
+        self.webView.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0];
         self.webView.opaque = NO;
-        self.webView.scrollView.bounces = NO;
+        self.webView.scrollView.scrollEnabled = NO;
         
         NSString *html = [NSString stringWithUTF8String:HTML_UI];
         [self.webView loadHTMLString:html baseURL:nil];
         [self addSubview:self.webView];
+
+        // 2. The Native Drag Handle (Matches your purple design)
+        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150)];
+        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
+        self.dragHandle.layer.cornerRadius = 22.5;
+        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
+        self.dragHandle.layer.borderWidth = 2.0;
+        self.dragHandle.layer.borderColor = [UIColor whiteColor].CGColor;
+        
+        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+        chevron.tintColor = [UIColor whiteColor];
+        chevron.frame = CGRectMake(10, 55, 25, 40);
+        chevron.contentMode = UIViewContentModeScaleAspectFit;
+        [self.dragHandle addSubview:chevron];
+        
+        [self addSubview:self.dragHandle];
+
+        // 3. Native Pan Gesture
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.dragHandle addGestureRecognizer:pan];
     }
     return self;
 }
 
-// THIS IS THE MAGIC TOUCH LOGIC
+// THE JOYSTICK FIX: Only intercept the left 50 pixels when closed.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.isOpen) {
-        // When closed, only let touches through on the left 30% of the screen
-        if (point.x < self.bounds.size.width * 0.3) {
-            return self.webView;
+        // If closed, ONLY the drag handle is touchable. Everything else goes to Roblox.
+        if (CGRectContainsPoint(self.dragHandle.frame, point)) {
+            return self.dragHandle;
         }
-        // Let the right side (joystick) pass through to Roblox
-        return nil;
+        return nil; 
     }
-    // When open, the whole screen goes to the WebView (so you can type)
+    // If open, the whole WebView is touchable so you can type.
     return self.webView;
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    CGPoint translation = [gesture translationInView:self];
+    CGFloat baseX = self.isOpen ? 0 : -700;
+    CGFloat newX = baseX + translation.x;
+    if (newX > 0) newX = 0;
+    if (newX < -700) newX = -700;
+
+    if (gesture.state == UIGestureRecognizerStateChanged) {
+        self.webView.frame = CGRectMake(newX, 0, 700, self.bounds.size.height);
+    } else if (gesture.state == UIGestureRecognizerStateEnded) {
+        if (newX > -350) [self openUI];
+        else [self closeUI];
+    }
+}
+
+- (void)openUI {
+    self.isOpen = YES;
+    [UIView animateWithDuration:0.3 animations:^{
+        self.webView.frame = CGRectMake(0, 0, 700, self.bounds.size.height);
+    }];
+}
+
+- (void)closeUI {
+    self.isOpen = NO;
+    [UIView animateWithDuration:0.3 animations:^{
+        self.webView.frame = CGRectMake(-700, 0, 700, self.bounds.size.height);
+    }];
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.body isKindOfClass:[NSString class]]) return;
-    NSString *body = message.body;
-    
-    if ([body isEqualToString:@"STAGE_OPEN"]) {
-        self.isOpen = YES;
-        return;
-    }
-    if ([body isEqualToString:@"STAGE_CLOSED"]) {
-        self.isOpen = NO;
-        return;
-    }
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        int res = ExecuteScript([body UTF8String]);
+        int res = ExecuteScript([message.body UTF8String]);
         dispatch_async(dispatch_get_main_queue(), ^{
             NSString *log = (res == 0) ? @"[Neko] Success." : @"[Neko] Error.";
             NSString *js = [NSString stringWithFormat:@"logMsg('%@');", log];
