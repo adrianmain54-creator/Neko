@@ -40,10 +40,28 @@ int ExecuteScript(const char* code) {
         self.backgroundColor = [UIColor clearColor];
         self.isOpen = NO;
 
+        // 1. The Main Drawer Container (Width 800, starts off-screen at -800)
         self.mainContainer = [[UIView alloc] initWithFrame:CGRectMake(-800, 0, 800, self.bounds.size.height)];
         self.mainContainer.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0];
         [self addSubview:self.mainContainer];
 
+        // 2. The Purple Drag Handle (Placed INSIDE the container at x=800, so it sticks out)
+        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(800, self.bounds.size.height/2 - 75, 45, 150)];
+        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
+        self.dragHandle.layer.cornerRadius = 22.5;
+        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
+        self.dragHandle.layer.borderWidth = 2.0;
+        self.dragHandle.layer.borderColor = [UIColor whiteColor].CGColor;
+        
+        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+        chevron.tintColor = [UIColor whiteColor];
+        chevron.frame = CGRectMake(10, 55, 25, 40);
+        chevron.contentMode = UIViewContentModeScaleAspectFit;
+        [self.dragHandle addSubview:chevron];
+        
+        [self.mainContainer addSubview:self.dragHandle];
+
+        // --- SIDEBAR ---
         UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 90, self.bounds.size.height)];
         sidebar.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         [self.mainContainer addSubview:sidebar];
@@ -75,10 +93,20 @@ int ExecuteScript(const char* code) {
             [sidebar addSubview:navItem];
         }
 
+        // --- EDITOR PANEL ---
         UIView *editorWrapper = [[UIView alloc] initWithFrame:CGRectMake(110, 20, 420, self.bounds.size.height - 40)];
         editorWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         editorWrapper.layer.cornerRadius = 12;
         [self.mainContainer addSubview:editorWrapper];
+
+        // The X Close Button
+        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        closeBtn.frame = CGRectMake(editorWrapper.bounds.size.width - 40, 10, 30, 30);
+        [closeBtn setTitle:@"✖" forState:UIControlStateNormal];
+        [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
+        closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
+        [closeBtn addTarget:self action:@selector(closeUI) forControlEvents:UIControlEventTouchUpInside];
+        [editorWrapper addSubview:closeBtn];
 
         self.editor = [[UITextView alloc] initWithFrame:CGRectMake(15, 15, 390, editorWrapper.bounds.size.height - 90)];
         self.editor.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.1 alpha:1.0];
@@ -101,6 +129,7 @@ int ExecuteScript(const char* code) {
         [execBtn addTarget:self action:@selector(execute) forControlEvents:UIControlEventTouchUpInside];
         [editorWrapper addSubview:execBtn];
 
+        // --- CONSOLE PANEL ---
         UIView *consoleWrapper = [[UIView alloc] initWithFrame:CGRectMake(545, 20, 240, self.bounds.size.height - 40)];
         consoleWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
         consoleWrapper.layer.cornerRadius = 12;
@@ -122,37 +151,30 @@ int ExecuteScript(const char* code) {
         self.console.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
         [consoleWrapper addSubview:self.console];
 
-        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150)];
-        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
-        self.dragHandle.layer.cornerRadius = 22.5;
-        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
-        self.dragHandle.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.dragHandle.layer.shadowOpacity = 0.3;
-        self.dragHandle.layer.shadowOffset = CGSizeMake(5, 0);
-        self.dragHandle.layer.shadowRadius = 10;
-        
-        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-        chevron.tintColor = [UIColor whiteColor];
-        chevron.frame = CGRectMake(12, 55, 25, 40);
-        chevron.contentMode = UIViewContentModeScaleAspectFit;
-        [self.dragHandle addSubview:chevron];
-        [self addSubview:self.dragHandle];
-
+        // --- GESTURES ---
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.dragHandle addGestureRecognizer:pan];
+
+        // Swipe Left to Close
+        UISwipeGestureRecognizer *swipeLeft = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(closeUI)];
+        swipeLeft.direction = UISwipeGestureRecognizerDirectionLeft;
+        [self.mainContainer addGestureRecognizer:swipeLeft];
     }
     return self;
 }
 
-// THE TOUCH FIX
+// THE PERFECT TOUCH LOGIC
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.isOpen) {
-        if (CGRectContainsPoint(self.dragHandle.frame, point)) {
-            return self.dragHandle;
+        // When closed, only the drag handle is clickable.
+        // The handle is at screen x=0 because the container is at -800 and handle is at 800.
+        UIView *hitView = [super hitTest:point withEvent:event];
+        if ([hitView isDescendantOfView:self.dragHandle]) {
+            return hitView;
         }
-        return nil; 
+        return nil; // Joystick passes through to Roblox
     }
-    // When open, we want the touches to go to our UI!
+    // When open, let the UI catch all touches (buttons, editor, swiping left)
     return [super hitTest:point withEvent:event];
 }
 
@@ -175,6 +197,8 @@ int ExecuteScript(const char* code) {
     self.isOpen = YES;
     [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.mainContainer.frame = CGRectMake(0, 0, 800, self.bounds.size.height);
+        // Fade out the handle when fully open
+        self.dragHandle.alpha = 0.0;
     } completion:nil];
 }
 
@@ -182,6 +206,8 @@ int ExecuteScript(const char* code) {
     self.isOpen = NO;
     [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.mainContainer.frame = CGRectMake(-800, 0, 800, self.bounds.size.height);
+        // Fade the handle back in
+        self.dragHandle.alpha = 1.0;
     } completion:nil];
 }
 
@@ -215,10 +241,9 @@ __attribute__((constructor)) static void init() {
         if (activeScene) {
             g_ui = [[NekoUI alloc] initWithScene:activeScene];
             
-            // THE FIX: Create a root view controller and disable interaction on its view
             UIViewController *rootVC = [[UIViewController alloc] init];
             rootVC.view.backgroundColor = [UIColor clearColor];
-            rootVC.view.userInteractionEnabled = NO; // This stops it from swallowing touches!
+            rootVC.view.userInteractionEnabled = NO; // Crucial: Prevents empty space from blocking touches
             
             g_ui.rootViewController = rootVC;
             [g_ui makeKeyAndVisible];
