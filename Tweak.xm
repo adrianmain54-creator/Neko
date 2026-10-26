@@ -50,7 +50,6 @@ box-sizing:border-box;will-change:transform; box-shadow: 10px 0 30px rgba(0,0,0,
 .anim{transition:transform .28s cubic-bezier(.2,.8,.2,1)}
 .scrim.anim{transition:opacity .28s}
 
-/* the arrow tab */
 .handle{position:absolute;right:-43px;top:50%;width:46px;height:150px;margin-top:-75px;box-sizing:border-box;
 background:linear-gradient(160deg,#bf5af2 0%,#8a2be2 50%,#6a0dad 100%);border-radius:0 80px 80px 0/0 75px 75px 0;
 box-shadow:0 8px 22px rgba(191,90,242,.45),0 2px 6px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.5),inset -3px 0 8px rgba(255,255,255,.14);
@@ -60,7 +59,6 @@ display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-col
 @keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
 @media (prefers-reduced-motion:reduce){.handle svg{animation:none}}
 
-/* NEKO UI CSS */
 .neko-container { display: flex; width: 100%; height: 100%; background: #17181b; color: #fff; }
 .neko-sidebar { width: 80px; background: #202226; display: flex; flex-direction: column; align-items: center; padding-top: 20px; border-right: 1px solid #333; }
 .neko-logo { color: #bf5af2; font-weight: 900; font-size: 20px; margin-bottom: 30px; }
@@ -218,10 +216,12 @@ function logMsg(msg) {
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
+        // FIXED: WebView covers the full screen so the HTML slide animations work correctly
         self.webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:config];
         self.webView.backgroundColor = [UIColor clearColor];
         self.webView.opaque = NO;
         self.webView.scrollView.scrollEnabled = NO;
+        self.webView.userInteractionEnabled = YES;
         
         NSString *html = [NSString stringWithUTF8String:HTML_UI];
         [self.webView loadHTMLString:html baseURL:nil];
@@ -230,17 +230,18 @@ function logMsg(msg) {
     return self;
 }
 
-// Native Touch logic: Pass to Roblox unless we are in the left 30% (when closed) or the UI is open
+// FIXED: Native Touch routing
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.currentStage == 0) {
-        // If fully closed, only intercept touches on the left 30% of the screen
+        // When closed, ONLY the left 30% interacts with the WebView (to catch your swipe)
         if (point.x < self.bounds.size.width * 0.3) {
-            return [super hitTest:point withEvent:event];
+            return self.webView;
         }
-        return nil; // Pass everything else to Roblox joystick
+        // The right 70% is ignored by the WebView, passing touches to Roblox
+        return nil;
     }
-    // If UI is open, intercept everything
-    return [super hitTest:point withEvent:event];
+    // When open (Stage 1 or 2), the WebView takes all touches
+    return self.webView;
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
