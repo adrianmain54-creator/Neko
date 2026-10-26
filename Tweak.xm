@@ -25,70 +25,184 @@ int ExecuteScript(const char* code) {
 
 const char* HTML_UI = R"STR(
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Swipe UI</title>
 <style>
-    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
-    body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-    .window { width: 700px; height: 480px; background: rgba(15, 15, 20, 0.95); border-radius: 0 20px 20px 0; border: 2px solid #bf5af2; border-left: none; display: flex; flex-direction: column; box-shadow: 10px 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(10px); }
-    .header { height: 50px; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    .title { color: #bf5af2; font-weight: 900; font-size: 24px; letter-spacing: 2px; }
-    .header-right { display: flex; align-items: center; gap: 15px; }
-    .toggle-container { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 12px; }
-    .toggle-container input { cursor: pointer; }
-    .close { color: #ff453a; font-size: 24px; cursor: pointer; padding: 5px; font-weight: bold; }
-    .content { display: flex; flex: 1; padding: 15px; gap: 15px; }
-    .left-panel { flex: 2; display: flex; flex-direction: column; gap: 15px; }
-    .right-panel { flex: 1; display: flex; flex-direction: column; gap: 15px; }
-    textarea { width: 100%; flex: 1; background: #1c1c1e; color: #fff; border: 1px solid #333; border-radius: 10px; padding: 10px; font-family: "Courier New", monospace; font-size: 14px; resize: none; outline: none; }
-    .console { flex: 1; background: #1c1c1e; color: #32d74b; border-radius: 10px; padding: 10px; font-family: "Courier New", monospace; font-size: 12px; overflow-y: auto; border: 1px solid #333; }
-    .execute-btn { height: 50px; background: #bf5af2; color: #000; font-weight: bold; font-size: 16px; border: none; border-radius: 10px; cursor: pointer; transition: 0.2s; box-shadow: 0 0 15px rgba(191, 90, 242, 0.4); }
-    .execute-btn:active { transform: scale(0.98); }
+:root{--bg:#17181b;--panel:#1c1c1e;--ink:#f1f1f3;--mute:#9a9aa2;--line:#bf5af2}
+html,body{height:100%;margin:0}
+body{background:transparent;color:var(--ink);font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+overflow:hidden;overscroll-behavior:none;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+
+.main{height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--mute);opacity:0;pointer-events:none;}
+.main b{display:block;color:var(--ink);font-size:22px;margin-bottom:8px}
+
+.scrim{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:30}
+
+.side{position:fixed;top:0;bottom:0;left:0;background:var(--panel);border-right:3px solid var(--line);
+box-sizing:border-box;will-change:transform; box-shadow: 10px 0 30px rgba(0,0,0,0.5);}
+#drawer{width:0;padding:0;z-index:40}
+#exec{width:100vw;border-right:none;z-index:50; background:#17181b;}
+#openExec{cursor:pointer}
+
+.anim{transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.scrim.anim{transition:opacity .28s}
+
+/* the arrow tab */
+.handle{position:absolute;right:-43px;top:50%;width:46px;height:150px;margin-top:-75px;box-sizing:border-box;
+background:linear-gradient(160deg,#bf5af2 0%,#8a2be2 50%,#6a0dad 100%);border-radius:0 80px 80px 0/0 75px 75px 0;
+box-shadow:0 8px 22px rgba(191,90,242,.45),0 2px 6px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.5),inset -3px 0 8px rgba(255,255,255,.14);
+display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;transition:transform .15s}
+.handle:active{transform:scale(.94)}
+.handle svg{width:24px;height:24px;margin-left:-2px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3));animation:nudge 1.8s ease-in-out infinite}
+@keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+@media (prefers-reduced-motion:reduce){.handle svg{animation:none}}
+
+/* NEKO UI CSS */
+.neko-container { display: flex; width: 100%; height: 100%; background: #17181b; color: #fff; }
+.neko-sidebar { width: 80px; background: #202226; display: flex; flex-direction: column; align-items: center; padding-top: 20px; border-right: 1px solid #333; }
+.neko-logo { color: #bf5af2; font-weight: 900; font-size: 20px; margin-bottom: 30px; }
+.neko-nav-item { display: flex; flex-direction: column; align-items: center; padding: 15px 0; color: #888; font-size: 10px; font-weight: bold; width: 100%; cursor: pointer; }
+.neko-nav-item.active { color: #bf5af2; background: rgba(191, 90, 242, 0.1); border-right: 3px solid #bf5af2; }
+.neko-nav-item .icon { font-size: 20px; margin-bottom: 5px; }
+.neko-main { flex: 1; display: flex; padding: 15px; gap: 15px; }
+.neko-editor-wrapper { flex: 2; display: flex; flex-direction: column; gap: 15px; }
+.neko-editor-wrapper textarea { flex: 1; background: #1c1c1e; color: #fff; border: 1px solid #333; border-radius: 10px; padding: 10px; font-family: "Courier New", monospace; font-size: 14px; resize: none; outline: none; }
+.neko-exec-btn { height: 50px; background: #bf5af2; color: #000; font-weight: bold; font-size: 16px; border: none; border-radius: 10px; cursor: pointer; transition: 0.2s; box-shadow: 0 0 15px rgba(191, 90, 242, 0.4); }
+.neko-exec-btn:active { transform: scale(0.98); }
+.neko-console-wrapper { flex: 1; display: flex; flex-direction: column; background: #1c1c1e; border: 1px solid #333; border-radius: 10px; overflow: hidden; }
+.neko-console-header { padding: 10px; background: #202226; color: #888; font-size: 12px; font-weight: bold; border-bottom: 1px solid #333; }
+.neko-console { flex: 1; padding: 10px; color: #32d74b; font-family: "Courier New", monospace; font-size: 12px; overflow-y: auto; }
 </style>
 </head>
 <body>
-    <div class="window">
-        <div class="header">
-            <div class="title">NEKO</div>
-            <div class="header-right">
-                <div class="toggle-container">
-                    <input type="checkbox" id="autoShowToggle" onchange="toggleAutoShow()">
-                    <label for="autoShowToggle">Auto-Open</label>
-                </div>
-                <div class="close" onclick="closeUI()">X</div>
-            </div>
-        </div>
-        <div class="content">
-            <div class="left-panel"><textarea id="script" placeholder="-- Paste script"></textarea><button class="execute-btn" onclick="executeScript()">EXECUTE</button></div>
-            <div class="right-panel"><div class="console" id="console">[Neko] Loaded.<br></div></div>
-        </div>
-    </div>
-    <script>
-        // Ask Objective-C for the current setting on load
-        window.onload = function() {
-            window.webkit.messageHandlers.nekoHandler.postMessage("GET_AUTO_OPEN");
-        };
-        
-        function setToggleState(isChecked) {
-            document.getElementById('autoShowToggle').checked = isChecked;
-        }
+<div class="main"><div><b>Swipe right</b>Swipe right once for the arrow, swipe right again for full screen. Swipe left to go back.</div></div>
+<div class="scrim" id="scrim"></div>
 
-        function toggleAutoShow() {
-            window.webkit.messageHandlers.nekoHandler.postMessage("TOGGLE_AUTO_OPEN");
-        }
-        function executeScript() { var code = document.getElementById('script').value; if(!code) return; document.getElementById('console').innerHTML += "> Executing...<br>"; window.webkit.messageHandlers.nekoHandler.postMessage(code); }
-        function closeUI() { window.webkit.messageHandlers.nekoHandler.postMessage("HIDE_UI"); }
-        function logMsg(msg) { document.getElementById('console').innerHTML += msg + "<br>"; }
-    </script>
+<aside class="side" id="drawer" aria-label="Open panel">
+  <div class="handle" id="openExec">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5 16.5 12 9 19.5"/></svg>
+  </div>
+</aside>
+
+<aside class="side" id="exec" aria-label="Full screen">
+  <div class="handle">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5 16.5 12 9 19.5"/></svg>
+  </div>
+  
+  <div class="neko-container">
+      <div class="neko-sidebar">
+          <div class="neko-logo">NEKO</div>
+          <div class="neko-nav">
+              <div class="neko-nav-item active"><div class="icon">▶</div> EXEC</div>
+              <div class="neko-nav-item"><div class="icon">📄</div> SCRI</div>
+              <div class="neko-nav-item"><div class="icon">📁</div> SAVED</div>
+              <div class="neko-nav-item"><div class="icon">⚙</div> CLA</div>
+          </div>
+      </div>
+      <div class="neko-main">
+          <div class="neko-editor-wrapper">
+              <textarea id="script" placeholder="-- A little space for your next idea."></textarea>
+              <button class="neko-exec-btn" onclick="executeScript()">EXECUTE</button>
+          </div>
+          <div class="neko-console-wrapper">
+              <div class="neko-console-header">Console</div>
+              <div class="neko-console" id="console">[Neko] Loaded.<br></div>
+          </div>
+      </div>
+  </div>
+</aside>
+
+<script>
+function executeScript() {
+    var code = document.getElementById('script').value;
+    if(!code) return;
+    document.getElementById('console').innerHTML += "> Executing...<br>";
+    window.webkit.messageHandlers.nekoHandler.postMessage(code);
+}
+function logMsg(msg) {
+    document.getElementById('console').innerHTML += msg + "<br>";
+}
+
+(function(){
+  var drawer=document.getElementById('drawer'),
+      exec=document.getElementById('exec'),
+      scrim=document.getElementById('scrim');
+  var hd=drawer.querySelector('.handle'),he=exec.querySelector('.handle');
+
+  var U1=60,
+      U2=Math.max(300,innerWidth),
+      stage=0,
+      d=null;
+
+  function pz(p){return p<=1?p*U1:U1+(p-1)*U2}
+  function zp(z){return z<=U1?z/U1:1+(z-U1)/U2}
+
+  function render(p){
+    var q=Math.min(p,1);
+    drawer.style.transform='translateX(calc(-1 * '+(1-q)+' * (100% + 60px)))';
+    exec.style.transform='translateX('+(-(1-Math.max(p-1,0))*100)+'%)';
+    hd.style.opacity=p<=1?1:0;
+    he.style.opacity=p>1?1:0;
+    scrim.style.opacity=(p/2)*.35;
+    scrim.style.pointerEvents=p>0.05?'auto':'none';
+  }
+
+  function go(s){
+    stage=Math.max(0,Math.min(2,s));
+    [drawer,exec,scrim].forEach(function(e){e.classList.add('anim')});
+    render(stage);
+    setTimeout(function(){[drawer,exec,scrim].forEach(function(e){e.classList.remove('anim')})},300);
+    window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_" + stage);
+  }
+
+  document.addEventListener('pointerdown',function(e){
+    if(e.clientX>innerWidth*0.3&&!e.target.closest('.side'))return;
+    d={x:e.clientX,y:e.clientY,t:Date.now(),on:false,p:stage,last:stage};
+  });
+
+  document.addEventListener('pointermove',function(e){
+    if(!d)return;
+    var dx=e.clientX-d.x,dy=e.clientY-d.y;
+    if(!d.on){
+      if(Math.abs(dx)<8&&Math.abs(dy)<8)return;
+      if(Math.abs(dy)>Math.abs(dx)){d=null;return}
+      d.on=true;[drawer,exec,scrim].forEach(function(el){el.classList.remove('anim')});
+    }
+    d.z=Math.max(0,Math.min(U1+U2,pz(d.p)+dx));
+    d.last=zp(d.z);
+    render(d.last);
+  });
+
+  function end(e){
+    if(!d)return;
+    if(d.on){
+      var v=(e.clientX-d.x)/Math.max(1,Date.now()-d.t);
+      var s=Math.round(zp(Math.max(0,pz(d.last)+v*250)));
+      if(s===d.p&&Math.abs(d.last-d.p)>.25)s=d.p+(d.last>d.p?1:-1);
+      go(s);
+    }
+    d=null;
+  }
+  document.addEventListener('pointerup',end);
+  document.addEventListener('pointercancel',end);
+
+  scrim.addEventListener('click',function(){go(0)});
+  document.getElementById('openExec').addEventListener('click',function(){go(2)});
+  addEventListener('keydown',function(e){if(e.key==='Escape')go(stage-1)});
+
+  render(0);
+})();
+</script>
 </body>
 </html>
 )STR";
 
 @interface NekoUI : UIWindow <WKScriptMessageHandler>
 @property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, strong) UIView *dragHandle;
-@property (nonatomic, assign) BOOL isUIDraggedOut;
+@property (nonatomic, assign) NSInteger currentStage;
 @end
 
 @implementation NekoUI
@@ -99,12 +213,12 @@ const char* HTML_UI = R"STR(
         self.frame = [UIScreen mainScreen].bounds;
         self.windowLevel = 999999;
         self.backgroundColor = [UIColor clearColor];
-        self.isUIDraggedOut = NO;
+        self.currentStage = 0;
 
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
         
-        self.webView = [[WKWebView alloc] initWithFrame:CGRectMake(-700, 100, 700, 480) configuration:config];
+        self.webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:config];
         self.webView.backgroundColor = [UIColor clearColor];
         self.webView.opaque = NO;
         self.webView.scrollView.scrollEnabled = NO;
@@ -112,106 +226,29 @@ const char* HTML_UI = R"STR(
         NSString *html = [NSString stringWithUTF8String:HTML_UI];
         [self.webView loadHTMLString:html baseURL:nil];
         [self addSubview:self.webView];
-
-        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, 350, 25, 100)];
-        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.9];
-        self.dragHandle.layer.cornerRadius = 12;
-        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
-        self.dragHandle.layer.borderWidth = 2.0;
-        self.dragHandle.layer.borderColor = [UIColor whiteColor].CGColor;
-        [self addSubview:self.dragHandle];
-
-        UIView *line1 = [[UIView alloc] initWithFrame:CGRectMake(8, 40, 9, 2)];
-        line1.backgroundColor = [UIColor whiteColor];
-        line1.alpha = 0.5;
-        [self.dragHandle addSubview:line1];
-        UIView *line2 = [[UIView alloc] initWithFrame:CGRectMake(8, 50, 9, 2)];
-        line2.backgroundColor = [UIColor whiteColor];
-        line2.alpha = 0.5;
-        [self.dragHandle addSubview:line2];
-        UIView *line3 = [[UIView alloc] initWithFrame:CGRectMake(8, 60, 9, 2)];
-        line3.backgroundColor = [UIColor whiteColor];
-        line3.alpha = 0.5;
-        [self.dragHandle addSubview:line3];
-
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.dragHandle addGestureRecognizer:pan];
     }
     return self;
 }
 
+// Native Touch logic: Pass to Roblox unless we are in the left 30% (when closed) or the UI is open
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.webView.frame.origin.x == 0) {
-        return [super hitTest:point withEvent:event];
+    if (self.currentStage == 0) {
+        // If fully closed, only intercept touches on the left 30% of the screen
+        if (point.x < self.bounds.size.width * 0.3) {
+            return [super hitTest:point withEvent:event];
+        }
+        return nil; // Pass everything else to Roblox joystick
     }
-    if (self.webView.frame.origin.x > -700 && self.webView.frame.origin.x < 0) {
-        return self;
-    }
-    if (!self.dragHandle.hidden && CGRectContainsPoint(self.dragHandle.frame, point)) {
-        return self.dragHandle;
-    }
-    return nil;
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    CGPoint translation = [gesture translationInView:self];
-    CGFloat baseX = self.isUIDraggedOut ? 0 : -700;
-    CGFloat newX = baseX + translation.x;
-
-    if (gesture.state == UIGestureRecognizerStateChanged) {
-        if (newX > 0) newX = 0;
-        if (newX < -700) newX = -700;
-        self.webView.frame = CGRectMake(newX, 100, 700, 480);
-        self.dragHandle.frame = CGRectMake(newX + 700, 350, 25, 100);
-    } 
-    else if (gesture.state == UIGestureRecognizerStateEnded) {
-        if (newX > -350) [self openUIFully];
-        else [self closeUIFully];
-    }
-}
-
-- (void)openUIFully {
-    self.isUIDraggedOut = YES;
-    [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.webView.frame = CGRectMake(0, 100, 700, 480);
-        self.dragHandle.frame = CGRectMake(700, 350, 25, 100);
-    } completion:^(BOOL finished) {
-        self.dragHandle.hidden = YES;
-    }];
-}
-
-- (void)closeUIFully {
-    self.isUIDraggedOut = NO;
-    self.dragHandle.hidden = NO;
-    [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.webView.frame = CGRectMake(-700, 100, 700, 480);
-        self.dragHandle.frame = CGRectMake(0, 350, 25, 100);
-    } completion:nil];
+    // If UI is open, intercept everything
+    return [super hitTest:point withEvent:event];
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.body isKindOfClass:[NSString class]]) return;
     NSString *body = message.body;
     
-    // --- Settings Logic ---
-    if ([body isEqualToString:@"GET_AUTO_OPEN"]) {
-        BOOL isAutoOpen = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
-        if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) isAutoOpen = YES; // Default to true
-        
-        NSString *js = [NSString stringWithFormat:@"setToggleState(%@);", isAutoOpen ? @"true" : @"false"];
-        [self.webView evaluateJavaScript:js completionHandler:nil];
-        return;
-    }
-    
-    if ([body isEqualToString:@"TOGGLE_AUTO_OPEN"]) {
-        BOOL current = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
-        if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) current = YES;
-        [[NSUserDefaults standardUserDefaults] setBool:!current forKey:@"NekoAutoOpen"];
-        return;
-    }
-    
-    if ([body isEqualToString:@"HIDE_UI"]) {
-        [self closeUIFully];
+    if ([body hasPrefix:@"STAGE_"]) {
+        self.currentStage = [[body substringFromIndex:6] integerValue];
         return;
     }
     
@@ -260,17 +297,6 @@ __attribute__((constructor)) static void init() {
                 g_ui = [[NekoUI alloc] initWithScene:activeScene];
                 g_ui.rootViewController = [[UIViewController alloc] init];
                 [g_ui makeKeyAndVisible];
-                
-                // --- Auto-Open Logic ---
-                BOOL isAutoOpen = [[NSUserDefaults standardUserDefaults] boolForKey:@"NekoAutoOpen"];
-                if ([[NSUserDefaults standardUserDefaults] objectForKey:@"NekoAutoOpen"] == nil) isAutoOpen = YES;
-                
-                if (isAutoOpen) {
-                    // Wait 2.5 seconds for the game to load, then slide the UI out
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [g_ui openUIFully];
-                    });
-                }
             }
         });
     });
