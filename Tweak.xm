@@ -40,13 +40,13 @@ int ExecuteScript(const char* code) {
         self.backgroundColor = [UIColor clearColor];
         self.isOpen = NO;
 
-        // 1. The Main Drawer Container (Width 800, starts off-screen at -800)
+        // 1. The Main Drawer Container
         self.mainContainer = [[UIView alloc] initWithFrame:CGRectMake(-800, 0, 800, self.bounds.size.height)];
         self.mainContainer.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0];
         [self addSubview:self.mainContainer];
 
-        // 2. The Purple Drag Handle (Placed INSIDE the container at x=800, so it sticks out)
-        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(800, self.bounds.size.height/2 - 75, 45, 150)];
+        // 2. The Purple Drag Handle (Direct child of the window so touches always register)
+        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150)];
         self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
         self.dragHandle.layer.cornerRadius = 22.5;
         self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
@@ -58,8 +58,7 @@ int ExecuteScript(const char* code) {
         chevron.frame = CGRectMake(10, 55, 25, 40);
         chevron.contentMode = UIViewContentModeScaleAspectFit;
         [self.dragHandle addSubview:chevron];
-        
-        [self.mainContainer addSubview:self.dragHandle];
+        [self addSubview:self.dragHandle];
 
         // --- SIDEBAR ---
         UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 90, self.bounds.size.height)];
@@ -155,7 +154,7 @@ int ExecuteScript(const char* code) {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.dragHandle addGestureRecognizer:pan];
 
-        // Swipe Left to Close
+        // Swipe Left to Close (Attached to the main UI)
         UISwipeGestureRecognizer *swipeLeft = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(closeUI)];
         swipeLeft.direction = UISwipeGestureRecognizerDirectionLeft;
         [self.mainContainer addGestureRecognizer:swipeLeft];
@@ -166,15 +165,13 @@ int ExecuteScript(const char* code) {
 // THE PERFECT TOUCH LOGIC
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.isOpen) {
-        // When closed, only the drag handle is clickable.
-        // The handle is at screen x=0 because the container is at -800 and handle is at 800.
-        UIView *hitView = [super hitTest:point withEvent:event];
-        if ([hitView isDescendantOfView:self.dragHandle]) {
-            return hitView;
+        // When closed, ONLY the drag handle is clickable.
+        if (CGRectContainsPoint(self.dragHandle.frame, point)) {
+            return self.dragHandle;
         }
-        return nil; // Joystick passes through to Roblox
+        return nil; // Everything else passes through to Roblox
     }
-    // When open, let the UI catch all touches (buttons, editor, swiping left)
+    // When open, the whole UI is touchable.
     return [super hitTest:point withEvent:event];
 }
 
@@ -186,7 +183,13 @@ int ExecuteScript(const char* code) {
     if (newX < -800) newX = -800;
 
     if (gesture.state == UIGestureRecognizerStateChanged) {
+        // Move the UI
         self.mainContainer.frame = CGRectMake(newX, 0, 800, self.bounds.size.height);
+        // Move the handle with the right edge of the UI
+        self.dragHandle.frame = CGRectMake(newX + 800, self.bounds.size.height/2 - 75, 45, 150);
+        // Fade the handle as it opens
+        self.dragHandle.alpha = 1.0 - (newX / -800.0);
+        
     } else if (gesture.state == UIGestureRecognizerStateEnded) {
         if (newX > -400) [self openUI];
         else [self closeUI];
@@ -197,7 +200,7 @@ int ExecuteScript(const char* code) {
     self.isOpen = YES;
     [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.mainContainer.frame = CGRectMake(0, 0, 800, self.bounds.size.height);
-        // Fade out the handle when fully open
+        self.dragHandle.frame = CGRectMake(800, self.bounds.size.height/2 - 75, 45, 150);
         self.dragHandle.alpha = 0.0;
     } completion:nil];
 }
@@ -206,7 +209,7 @@ int ExecuteScript(const char* code) {
     self.isOpen = NO;
     [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.mainContainer.frame = CGRectMake(-800, 0, 800, self.bounds.size.height);
-        // Fade the handle back in
+        self.dragHandle.frame = CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150);
         self.dragHandle.alpha = 1.0;
     } completion:nil];
 }
@@ -243,7 +246,7 @@ __attribute__((constructor)) static void init() {
             
             UIViewController *rootVC = [[UIViewController alloc] init];
             rootVC.view.backgroundColor = [UIColor clearColor];
-            rootVC.view.userInteractionEnabled = NO; // Crucial: Prevents empty space from blocking touches
+            rootVC.view.userInteractionEnabled = NO; 
             
             g_ui.rootViewController = rootVC;
             [g_ui makeKeyAndVisible];
