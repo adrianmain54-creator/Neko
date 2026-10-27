@@ -14,7 +14,8 @@ jobs:
 
       - name: Download IPA from Release
         run: |
-          curl -L -o roblox.ipa "https://github.com/adrianmain54-creator/Neko/releases/download/V1/com.roblox.robloxmobile_2.743.1136_und3fined.ipa"
+          # Added Authorization token to download from your Private repo
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -o roblox.ipa "https://github.com/adrianmain54-creator/Neko/releases/download/V1/com.roblox.robloxmobile_2.743.1136_und3fined.ipa"
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
