@@ -24,7 +24,7 @@ lua_State* get_roblox_state() {
     return g_L;
 }
 
-// Stealth Hook: Metatable Hijack instead of MSHookFunction
+// Stealth Hook: Metatable Hijack
 void neko_install_hooks(lua_State* L) {
     if (!L) return;
     lua_getglobal(L, "game");
