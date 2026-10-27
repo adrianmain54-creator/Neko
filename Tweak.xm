@@ -19,7 +19,7 @@ extern lua_State* get_roblox_state();
     self = [super initWithWindowScene:scene];
     if (self) {
         self.frame = [UIScreen mainScreen].bounds;
-        self.windowLevel = 999999;
+        self.windowLevel = 10000;
         self.backgroundColor = [UIColor clearColor];
         self.isOpen = NO;
 
@@ -78,7 +78,7 @@ extern lua_State* get_roblox_state();
 
         UIView *editorWrapper = [[UIView alloc] initWithFrame:CGRectMake(110, 20, 420, self.bounds.size.height - 40)];
         editorWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
-        editorWrapper.layer.cornerRadius = 12;
+        editorWrapper.layer.cornerRadius = 15;
         [self.mainContainer addSubview:editorWrapper];
 
         self.editor = [[UITextView alloc] initWithFrame:CGRectMake(15, 15, 390, editorWrapper.bounds.size.height - 90)];
@@ -86,7 +86,7 @@ extern lua_State* get_roblox_state();
         self.editor.textColor = [UIColor whiteColor];
         self.editor.font = [UIFont fontWithName:@"Menlo" size:14];
         self.editor.text = @"print(\"Neko PC-Speed Loaded!\")";
-        self.editor.layer.cornerRadius = 8;
+        self.editor.layer.cornerRadius = 9;
         self.editor.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
         [editorWrapper addSubview:self.editor];
 
@@ -96,7 +96,7 @@ extern lua_State* get_roblox_state();
         [execBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
         execBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
         execBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-        execBtn.layer.cornerRadius = 10;
+        execBtn.layer.cornerRadius = 9;
         [execBtn addTarget:self action:@selector(execute) forControlEvents:UIControlEventTouchUpInside];
         [editorWrapper addSubview:execBtn];
 
@@ -112,11 +112,11 @@ extern lua_State* get_roblox_state();
         [consoleWrapper addSubview:consoleHeader];
 
         self.console = [[UITextView alloc] initWithFrame:CGRectMake(15, 45, 210, consoleWrapper.bounds.size.height - 60)];
-        self.console.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.1 alpha:1.0];
-        self.console.textColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.3 alpha:1.0];
-        self.console.font = [UIFont fontWithName:@"Menlo" size:12];
+        self.console.backgroundColor = [UIColor colorWithRed:0.23 green:0.08 blue:0.1 alpha:1.0];
+        self.console.textColor = [UIColor colorWithRed:1 green:0.8 blue:0.3 alpha:1.0];
+        self.console.font = [UIFont fontWithName:@"Menlo" size:10];
         self.console.editable = NO;
-        self.console.layer.cornerRadius = 8;
+        self.console.layer.cornerRadius = 6.5;
         self.console.text = @"[Neko] PC-Speed Engine Ready.\n";
         self.console.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
         [consoleWrapper addSubview:self.console];
@@ -141,7 +141,7 @@ extern lua_State* get_roblox_state();
 
 - (void)handleTabTap:(UITapGestureRecognizer *)gesture {
     NSInteger index = gesture.view.tag;
-    NSString *tabName = (index == 0) ? @"EXEC" : (index == 1) ? @"SCRIPTS" : (index == 2) ? @"SAVED" : @"SETTINGS";
+    NSString *tabName = (index == 0) ? @"Execute" : (index == 1) ? @"Scripts" : (index == 2) ? @"Saved" : @"Settings";
     self.console.text = [self.console.text stringByAppendingString:[NSString stringWithFormat:@"\n[Tab] %@", tabName]];
 }
 
@@ -171,7 +171,7 @@ extern lua_State* get_roblox_state();
 
 - (void)closeUI {
     self.isOpen = NO;
-    [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseOut animations:^{
+    [UIView animateWithDuration:0.3 delay:0.2 usingSpringWithDamping:0.8 initialSpringVelocity:0.8 options:UIViewAnimationOptionCurveEaseOut animations:^{
         self.mainContainer.frame = CGRectMake(-800, 0, 800, self.bounds.size.height);
         self.dragHandle.frame = CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150);
         self.dragHandle.alpha = 1.0;
