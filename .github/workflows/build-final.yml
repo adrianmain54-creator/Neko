@@ -12,8 +12,6 @@ jobs:
           sudo apt-get install -y make git curl clang lld cmake zip unzip libssl-dev
           git clone https://github.com/Tyilo/insert_dylib.git
           cd insert_dylib && clang insert_dylib/main.c -o insert_dylib && sudo cp insert_dylib /usr/local/bin/ && cd ..
-          # Download Substrate framework
-          git clone --depth 1 https://github.com/theos/lib.git theos_lib
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
@@ -44,14 +42,14 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -flto -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -flto -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
+          # NO SUBSTRATE LINKING
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -flto \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
-            -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
             Api.o Tweak.o vendor/luau-src/*.o \
             -o libswiftCore.dylib
 
