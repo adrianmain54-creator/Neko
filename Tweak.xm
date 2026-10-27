@@ -3,24 +3,7 @@
 #include "Neko.h"
 #include <dlfcn.h>
 
-static lua_State* g_L = nullptr;
-
-int ExecuteScript(const char* code) {
-    if (!g_L) {
-        void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
-        if (addr) g_L = ((lua_State*(*)(void*, void*))addr)(nullptr, nullptr);
-    }
-    if (!g_L) return -1;
-
-    lua_State* T = lua_newthread(g_L);
-    luaL_sandboxthread(T);
-    neko_register_api(T);
-    neko_install_hooks(T);
-    
-    if (luau_load(T, "=console", code, strlen(code), 0) != 0) return -2;
-    if (lua_pcall(T, 0, 0, 0) != 0) return -3;
-    return 0;
-}
+extern lua_State* get_roblox_state();
 
 @interface NekoUI : UIWindow
 @property (nonatomic, strong) UIView *mainContainer;
@@ -32,197 +15,58 @@ int ExecuteScript(const char* code) {
 
 @implementation NekoUI
 
-- (instancetype)initWithScene:(UIWindowScene *)scene {
-    self = [super initWithWindowScene:scene];
-    if (self) {
-        self.frame = [UIScreen mainScreen].bounds;
-        self.windowLevel = 999999;
-        self.backgroundColor = [UIColor clearColor];
-        self.isOpen = NO;
-
-        // 1. The Main Drawer Container
-        self.mainContainer = [[UIView alloc] initWithFrame:CGRectMake(-800, 0, 800, self.bounds.size.height)];
-        self.mainContainer.backgroundColor = [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0];
-        [self addSubview:self.mainContainer];
-
-        // 2. The Purple Drag Handle (Direct child of the window so touches always register)
-        self.dragHandle = [[UIView alloc] initWithFrame:CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150)];
-        self.dragHandle.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
-        self.dragHandle.layer.cornerRadius = 22.5;
-        self.dragHandle.layer.maskedCorners = kCALayerMaxXMaxYCorner | kCALayerMaxXMinYCorner;
-        self.dragHandle.layer.borderWidth = 2.0;
-        self.dragHandle.layer.borderColor = [UIColor whiteColor].CGColor;
-        
-        UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-        chevron.tintColor = [UIColor whiteColor];
-        chevron.frame = CGRectMake(10, 55, 25, 40);
-        chevron.contentMode = UIViewContentModeScaleAspectFit;
-        [self.dragHandle addSubview:chevron];
-        [self addSubview:self.dragHandle];
-
-        // --- SIDEBAR ---
-        UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 90, self.bounds.size.height)];
-        sidebar.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
-        [self.mainContainer addSubview:sidebar];
-
-        UILabel *logo = [[UILabel alloc] initWithFrame:CGRectMake(0, 40, 90, 30)];
-        logo.text = @"NEKO";
-        logo.textColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
-        logo.font = [UIFont fontWithName:@"AvenirNext-Heavy" size:22];
-        logo.textAlignment = NSTextAlignmentCenter;
-        [sidebar addSubview:logo];
-
-        NSArray *navItems = @[@"▶\nEXEC", @"📄\nSCRI", @"📁\nSAVED", @"⚙\nCLA"];
-        for (int i = 0; i < 4; i++) {
-            UIView *navItem = [[UIView alloc] initWithFrame:CGRectMake(0, 100 + (i * 90), 90, 70)];
-            if (i == 0) {
-                navItem.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:0.15];
-                UIView *indicator = [[UIView alloc] initWithFrame:CGRectMake(87, 0, 3, 70)];
-                indicator.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
-                [navItem addSubview:indicator];
-            }
-            
-            UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 90, 70)];
-            lbl.text = navItems[i];
-            lbl.textColor = (i == 0) ? [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0] : [UIColor grayColor];
-            lbl.font = [UIFont boldSystemFontOfSize:12];
-            lbl.textAlignment = NSTextAlignmentCenter;
-            lbl.numberOfLines = 2;
-            [navItem addSubview:lbl];
-            [sidebar addSubview:navItem];
-        }
-
-        // --- EDITOR PANEL ---
-        UIView *editorWrapper = [[UIView alloc] initWithFrame:CGRectMake(110, 20, 420, self.bounds.size.height - 40)];
-        editorWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
-        editorWrapper.layer.cornerRadius = 12;
-        [self.mainContainer addSubview:editorWrapper];
-
-        // The X Close Button
-        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        closeBtn.frame = CGRectMake(editorWrapper.bounds.size.width - 40, 10, 30, 30);
-        [closeBtn setTitle:@"✖" forState:UIControlStateNormal];
-        [closeBtn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
-        closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-        [closeBtn addTarget:self action:@selector(closeUI) forControlEvents:UIControlEventTouchUpInside];
-        [editorWrapper addSubview:closeBtn];
-
-        self.editor = [[UITextView alloc] initWithFrame:CGRectMake(15, 15, 390, editorWrapper.bounds.size.height - 90)];
-        self.editor.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.1 alpha:1.0];
-        self.editor.textColor = [UIColor whiteColor];
-        self.editor.font = [UIFont fontWithName:@"Menlo" size:14];
-        self.editor.text = @"-- A little space for your next idea.";
-        self.editor.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        self.editor.autocorrectionType = UITextAutocorrectionTypeNo;
-        self.editor.layer.cornerRadius = 8;
-        self.editor.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
-        [editorWrapper addSubview:self.editor];
-
-        UIButton *execBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        execBtn.frame = CGRectMake(15, editorWrapper.bounds.size.height - 65, 390, 50);
-        [execBtn setTitle:@"EXECUTE" forState:UIControlStateNormal];
-        [execBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
-        execBtn.backgroundColor = [UIColor colorWithRed:0.75 green:0.35 blue:0.95 alpha:1.0];
-        execBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-        execBtn.layer.cornerRadius = 10;
-        [execBtn addTarget:self action:@selector(execute) forControlEvents:UIControlEventTouchUpInside];
-        [editorWrapper addSubview:execBtn];
-
-        // --- CONSOLE PANEL ---
-        UIView *consoleWrapper = [[UIView alloc] initWithFrame:CGRectMake(545, 20, 240, self.bounds.size.height - 40)];
-        consoleWrapper.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:1.0];
-        consoleWrapper.layer.cornerRadius = 12;
-        [self.mainContainer addSubview:consoleWrapper];
-
-        UILabel *consoleHeader = [[UILabel alloc] initWithFrame:CGRectMake(15, 15, 210, 20)];
-        consoleHeader.text = @"Console";
-        consoleHeader.textColor = [UIColor grayColor];
-        consoleHeader.font = [UIFont boldSystemFontOfSize:14];
-        [consoleWrapper addSubview:consoleHeader];
-
-        self.console = [[UITextView alloc] initWithFrame:CGRectMake(15, 45, 210, consoleWrapper.bounds.size.height - 60)];
-        self.console.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.1 alpha:1.0];
-        self.console.textColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.3 alpha:1.0];
-        self.console.font = [UIFont fontWithName:@"Menlo" size:12];
-        self.console.editable = NO;
-        self.console.layer.cornerRadius = 8;
-        self.console.text = @"[Neko] Loaded.\n";
-        self.console.textContainerInset = UIEdgeInsetsMake(10, 10, 10, 10);
-        [consoleWrapper addSubview:self.console];
-
-        // --- GESTURES ---
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.dragHandle addGestureRecognizer:pan];
-
-        // Swipe Left to Close (Attached to the main UI)
-        UISwipeGestureRecognizer *swipeLeft = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(closeUI)];
-        swipeLeft.direction = UISwipeGestureRecognizerDirectionLeft;
-        [self.mainContainer addGestureRecognizer:swipeLeft];
-    }
-    return self;
-}
-
-// THE PERFECT TOUCH LOGIC
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.isOpen) {
-        // When closed, ONLY the drag handle is clickable.
-        if (CGRectContainsPoint(self.dragHandle.frame, point)) {
-            return self.dragHandle;
-        }
-        return nil; // Everything else passes through to Roblox
-    }
-    // When open, the whole UI is touchable.
-    return [super hitTest:point withEvent:event];
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    CGPoint translation = [gesture translationInView:self];
-    CGFloat baseX = self.isOpen ? 0 : -800;
-    CGFloat newX = baseX + translation.x;
-    if (newX > 0) newX = 0;
-    if (newX < -800) newX = -800;
-
-    if (gesture.state == UIGestureRecognizerStateChanged) {
-        // Move the UI
-        self.mainContainer.frame = CGRectMake(newX, 0, 800, self.bounds.size.height);
-        // Move the handle with the right edge of the UI
-        self.dragHandle.frame = CGRectMake(newX + 800, self.bounds.size.height/2 - 75, 45, 150);
-        // Fade the handle as it opens
-        self.dragHandle.alpha = 1.0 - (newX / -800.0);
-        
-    } else if (gesture.state == UIGestureRecognizerStateEnded) {
-        if (newX > -400) [self openUI];
-        else [self closeUI];
-    }
-}
-
-- (void)openUI {
-    self.isOpen = YES;
-    [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.mainContainer.frame = CGRectMake(0, 0, 800, self.bounds.size.height);
-        self.dragHandle.frame = CGRectMake(800, self.bounds.size.height/2 - 75, 45, 150);
-        self.dragHandle.alpha = 0.0;
-    } completion:nil];
-}
-
-- (void)closeUI {
-    self.isOpen = NO;
-    [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.mainContainer.frame = CGRectMake(-800, 0, 800, self.bounds.size.height);
-        self.dragHandle.frame = CGRectMake(0, self.bounds.size.height/2 - 75, 45, 150);
-        self.dragHandle.alpha = 1.0;
-    } completion:nil];
-}
+// ... [Keep all the UI initialization code exactly the same as the last message] ...
 
 - (void)execute {
     NSString *code = self.editor.text;
     if (code.length == 0) return;
     
+    self.console.text = [self.console.text stringByAppendingString:@"\n> Executing..."];
+    
+    // HIGH PRIORITY THREAD: Fastest possible execution
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        int res = ExecuteScript([code UTF8String]);
+        lua_State* L = get_roblox_state(); 
+        if (!L) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.console.text = [self.console.text stringByAppendingString:@"\n[Error] VM not ready."];
+            });
+            return;
+        }
+
+        // 1. Create the thread (Luau's newthread is extremely fast)
+        lua_State* T = lua_newthread(L);
+        
+        // 2. Compile the script directly to bytecode (no extra parsing overhead)
+        size_t bytecodeSize = 0;
+        char* bytecode = luau_compile(code.UTF8String, strlen(code.UTF8String), nullptr, &bytecodeSize);
+        
+        NSString *resultMsg = @"";
+        
+        if (!bytecode) {
+            resultMsg = @"\n[Syntax Error] Failed to compile.";
+        } else {
+            // 3. Load the compiled bytecode into the thread
+            if (luau_load(T, "=neko", bytecode, bytecodeSize, 0) != 0) {
+                const char* err = lua_tostring(T, -1);
+                resultMsg = [NSString stringWithFormat:@"\n[Load Error] %s", err ? err : "Unknown"];
+            } else {
+                // 4. Register API only AFTER bytecode is loaded (saves time)
+                luaL_sandboxthread(T);
+                neko_register_api(T);
+                
+                // 5. Execute
+                if (lua_pcall(T, 0, 0, 0) != 0) {
+                    const char* err = lua_tostring(T, -1);
+                    resultMsg = [NSString stringWithFormat:@"\n[Runtime Error] %s", err ? err : "Unknown"];
+                } else {
+                    resultMsg = @"\n[Success] Executed instantly!";
+                }
+            }
+            free(bytecode); // Clean up
+        }
+        
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *log = (res == 0) ? @"[Neko] Success.\n" : @"[Neko] Error.\n";
-            self.console.text = [self.console.text stringByAppendingString:log];
+            self.console.text = [self.console.text stringByAppendingString:resultMsg];
             [self.console scrollRangeToVisible:NSMakeRange([self.console.text length], 0)];
         });
     });
@@ -230,26 +74,4 @@ int ExecuteScript(const char* code) {
 
 @end
 
-static NekoUI *g_ui = nil;
-
-__attribute__((constructor)) static void init() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindowScene *activeScene = nil;
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if (s.activationState == UISceneActivationStateForegroundActive && [s isKindOfClass:[UIWindowScene class]]) {
-                activeScene = (UIWindowScene *)s;
-                break;
-            }
-        }
-        if (activeScene) {
-            g_ui = [[NekoUI alloc] initWithScene:activeScene];
-            
-            UIViewController *rootVC = [[UIViewController alloc] init];
-            rootVC.view.backgroundColor = [UIColor clearColor];
-            rootVC.view.userInteractionEnabled = NO; 
-            
-            g_ui.rootViewController = rootVC;
-            [g_ui makeKeyAndVisible];
-        }
-    });
-}
+// ... [Keep the init function exactly the same] ...
