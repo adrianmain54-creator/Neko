@@ -24,22 +24,16 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # EXPLICITLY target only the required modules. NO CodeGen, NO tests.
-          for module in VM Compiler Ast Common Analysis Bytecode; do
+          # Compile ONLY these exact modules. 
+          # No Analysis, no CodeGen, no tests.
+          for module in VM Compiler Ast Common Bytecode; do
             mkdir -p "build_$module"
             find "$module/src" -name "*.cpp" | while read f; do
               clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_$module/$(basename "${f%.cpp}").o" || true
             done
           done
           
-          # Create the DummyFlags file to fix the undefined FFlag symbol
-          cat << 'EOF' > DummyFlags.cpp
-          #include "Luau/Common.h"
-          LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
-          EOF
-          
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c DummyFlags.cpp -o build_Common/DummyFlags.o
-          
+          # Copy headers for our API
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
@@ -56,7 +50,7 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Link all compiled objects
+          # Gather all compiled objects
           LUAU_OBJS=$(find vendor/luau-src/build_* -name "*.o" | tr '\n' ' ')
           
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
