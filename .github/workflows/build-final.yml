@@ -80,13 +80,14 @@ jobs:
           
           cp libswiftCore.dylib "$APP_PATH/"
           
+          # Using the modern LIEF API to add the library
           python3 -c "
           import lief
           bin_path = '$BINARY_PATH'
           binary = lief.parse(bin_path)
-          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/libswiftCore.dylib')
-          binary.add(dylib_cmd)
+          binary.add_library('@executable_path/libswiftCore.dylib')
           binary.write(bin_path)
+          print('Injected libswiftCore.dylib successfully!')
           "
           
           ./ldid_linux_x86_64 -S "$BINARY_PATH"
