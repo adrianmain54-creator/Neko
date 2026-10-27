@@ -15,7 +15,7 @@ jobs:
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile Luau (PC-Level Speed)
+      - name: Compile All Luau Modules
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
@@ -24,13 +24,21 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # -O3 -flto and armv8.2-a for maximum Apple Silicon execution speed
-          for module in VM Compiler Ast Common Analysis; do
-            for f in $module/src/*.cpp; do
-              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -flto $INCLUDES -c "$f" -o "build_$(basename $f).o" || true
-            done
+          # COMPILE EVERY SINGLE CPP FILE to guarantee no missing symbols
+          find . -name "*.cpp" | while read f; do
+            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "${f%.cpp}.o" || true
           done
           
+          # --- SEPARATE FFLAG FILE ---
+          # This creates a dummy file to satisfy the linker without touching Api.mm
+          cat << 'EOF' > DummyFlags.cpp
+          #include "Luau/Common.h"
+          LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
+          EOF
+          
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c DummyFlags.cpp -o DummyFlags.o
+          # ----------------------------
+
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
@@ -42,41 +50,35 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -flto -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Outputting as libswiftCore.dylib instead of neko.dylib for stealth
-          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -flto \
+          # Gather ALL compiled .o files including our DummyFlags.o
+          LUAU_OBJS=$(find vendor/luau-src -name "*.o" | tr '\n' ' ')
+          
+          clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
-            Api.o Tweak.o vendor/luau-src/*.o \
+            Api.o Tweak.o $LUAU_OBJS \
             -o libswiftCore.dylib
 
-      - name: Sign and Strip Dylib
+      - name: Strip and Sign Dylib
         run: |
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
-          
-          # Strip symbols to hide function names from Hyperion scanners
           strip -x libswiftCore.dylib
-          
-          # Sign the dylib
           ./ldid_linux_x86_64 -S libswiftCore.dylib
 
       - name: Static Inject into Roblox IPA (Using LIEF)
         run: |
-          # Ensure roblox.ipa is in the root of your repo!
           mkdir extract
           unzip roblox.ipa -d extract
-          
           APP_PATH="extract/Payload/Roblox.app"
           BINARY_PATH="$APP_PATH/Roblox"
           
-          # 1. Copy the payload into the app bundle
           cp libswiftCore.dylib "$APP_PATH/"
           
-          # 2. Use Python LIEF to inject the load command
           python3 -c "
           import lief
           bin_path = '$BINARY_PATH'
@@ -84,16 +86,11 @@ jobs:
           dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/libswiftCore.dylib')
           binary.add(dylib_cmd)
           binary.write(bin_path)
-          print('Injected libswiftCore.dylib successfully!')
           "
           
-          # 3. Re-sign the modified binary
           ./ldid_linux_x86_64 -S "$BINARY_PATH"
           
-          # 4. Re-zip the payload into a new IPA
-          cd extract
-          zip -qry ../Neko-Fast.ipa Payload
-          cd ..
+          cd extract && zip -qry ../Neko-Fast.ipa Payload && cd ..
 
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
