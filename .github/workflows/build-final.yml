@@ -71,16 +71,18 @@ jobs:
           llvm-strip -x libswiftCore.dylib || echo "Skipping strip"
           ./ldid_linux_x86_64 -S libswiftCore.dylib
 
-      - name: Static Inject into Roblox IPA
+      - name: Static Inject & Rename App
         run: |
           mkdir extract
           unzip roblox.ipa -d extract
           APP_PATH="extract/Payload/Roblox.app"
           BINARY_PATH="$APP_PATH/Roblox"
+          PLIST_PATH="$APP_PATH/Info.plist"
           
+          # 1. Copy the payload
           cp libswiftCore.dylib "$APP_PATH/"
           
-          # Using the modern LIEF API to add the library
+          # 2. Inject the load command
           python3 -c "
           import lief
           bin_path = '$BINARY_PATH'
@@ -90,9 +92,30 @@ jobs:
           print('Injected libswiftCore.dylib successfully!')
           "
           
+          # 3. Rename the app to Neko
+          python3 -c "
+          import plistlib
+          with open('$PLIST_PATH', 'rb') as f:
+              plist = plistlib.load(f)
+          plist['CFBundleDisplayName'] = 'Neko'
+          plist['CFBundleName'] = 'Neko'
+          with open('$PLIST_PATH', 'wb') as f:
+              plistlib.dump(plist, f)
+          print('Renamed app to Neko!')
+          "
+          
+          # 4. Re-sign the binary
           ./ldid_linux_x86_64 -S "$BINARY_PATH"
           
+          # 5. Re-zip
           cd extract && zip -qry ../Neko-Fast.ipa Payload && cd ..
+
+      # --- SEPARATE UPLOAD BUTTONS ---
+      - name: Upload Dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: libswiftCore-dylib
+          path: libswiftCore.dylib
 
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
