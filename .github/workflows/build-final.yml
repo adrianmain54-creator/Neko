@@ -9,13 +9,16 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip
+          sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip jq
           pip3 install lief
 
-      - name: Download IPA from Release
+      - name: Download IPA from Release (API)
         run: |
-          # Added Authorization token to download from your Private repo
-          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -o roblox.ipa "https://github.com/adrianmain54-creator/Neko/releases/download/V1/com.roblox.robloxmobile_2.743.1136_und3fined.ipa"
+          # Get the download URL via the GitHub API
+          ASSET_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/releases/tags/V1" | jq -r '.assets[] | select(.name | endswith(".ipa")) | .url')
+          
+          # Download the actual binary file
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -o roblox.ipa "$ASSET_URL"
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
@@ -29,7 +32,7 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Explicitly compile ONLY these modules. No Analysis, CodeGen, or tests.
+          # Compile ONLY these exact modules
           for module in VM Compiler Ast Common Bytecode; do
             mkdir -p "build_$module"
             find "$module/src" -name "*.cpp" | while read f; do
@@ -37,7 +40,7 @@ jobs:
             done
           done
           
-          # Copy headers for our API
+          # Copy headers
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
@@ -54,10 +57,8 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Gather all compiled Luau objects
           LUAU_OBJS=$(find vendor/luau-src/build_* -name "*.o" | tr '\n' ' ')
           
-          # Link into libswiftCore.dylib
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
             Api.o Tweak.o $LUAU_OBJS \
@@ -67,11 +68,7 @@ jobs:
         run: |
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
-          
-          # Use llvm-strip to properly strip Apple Mach-O symbols
           llvm-strip -x libswiftCore.dylib || echo "Skipping strip"
-          
-          # Sign the dylib
           ./ldid_linux_x86_64 -S libswiftCore.dylib
 
       - name: Static Inject into Roblox IPA
@@ -81,10 +78,8 @@ jobs:
           APP_PATH="extract/Payload/Roblox.app"
           BINARY_PATH="$APP_PATH/Roblox"
           
-          # Copy the payload into the app bundle
           cp libswiftCore.dylib "$APP_PATH/"
           
-          # Inject the load command using LIEF
           python3 -c "
           import lief
           bin_path = '$BINARY_PATH'
@@ -92,16 +87,11 @@ jobs:
           dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/libswiftCore.dylib')
           binary.add(dylib_cmd)
           binary.write(bin_path)
-          print('Injected libswiftCore.dylib successfully!')
           "
           
-          # Re-sign the modified binary
           ./ldid_linux_x86_64 -S "$BINARY_PATH"
           
-          # Re-zip the payload
-          cd extract
-          zip -qry ../Neko-Fast.ipa Payload
-          cd ..
+          cd extract && zip -qry ../Neko-Fast.ipa Payload && cd ..
 
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
