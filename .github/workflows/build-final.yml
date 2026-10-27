@@ -9,7 +9,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip unzip libssl-dev python3 python3-pip
+          sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip
           pip3 install lief
 
       - name: Download SDK
@@ -24,8 +24,7 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # Compile ONLY these exact modules. 
-          # No Analysis, no CodeGen, no tests.
+          # Compile ONLY these exact modules. No Analysis, no CodeGen, no tests.
           for module in VM Compiler Ast Common Bytecode; do
             mkdir -p "build_$module"
             find "$module/src" -name "*.cpp" | while read f; do
@@ -62,7 +61,11 @@ jobs:
         run: |
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
-          strip -x libswiftCore.dylib
+          
+          # Use llvm-strip to strip Mach-O symbols, or ignore if it fails
+          llvm-strip -x libswiftCore.dylib || echo "Skipping strip"
+          
+          # Sign the dylib
           ./ldid_linux_x86_64 -S libswiftCore.dylib
 
       - name: Static Inject into Roblox IPA (Using LIEF)
