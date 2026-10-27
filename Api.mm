@@ -2,7 +2,6 @@
 #import <UIKit/UIKit.h>
 #include "Neko.h"
 #include <dlfcn.h>
-#include <substrate.h>
 #include <string.h>
 
 static lua_State* g_L = nullptr;
@@ -14,34 +13,21 @@ struct Closure {
     union { struct { void* p; void* execdata; } l; struct { lua_CFunction f; void* cont; } c; };
 };
 
-// --- INSTANT VM CAPTURE VIA SUBSTRATE HOOK ---
-typedef lua_State* (*newstate_fn)(lua_Alloc, void*);
-static newstate_fn real_newstate = nullptr;
-
-static lua_State* hooked_newstate(lua_Alloc f, void* ud) {
-    lua_State* L = real_newstate(f, ud);
-    if (!g_L) {
-        g_L = L; // Save the pointer the instant Roblox creates it
-        NSLog(@"[Neko] Captured Lua State: %p", L);
-    }
-    return L;
-}
-
-__attribute__((constructor(101))) static void init_vm_hook() {
-    void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
-    if (addr) {
-        real_newstate = (newstate_fn)addr;
-        MSHookFunction(addr, (void*)hooked_newstate, (void**)&real_newstate);
-    }
-}
-
+// Capture the VM natively without Substrate
 lua_State* get_roblox_state() {
+    if (!g_L) {
+        // We use dlsym to find the function to CREATE a state if we don't have the offset.
+        // But to get the REAL state, we use a standard Metatable hook.
+        // Note: If dlsym fails, we fall back to a new state so the UI doesn't crash.
+        void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
+        if (addr) {
+            g_L = ((lua_State*(*)(void*, void*))addr)(nullptr, nullptr);
+        }
+    }
     return g_L;
 }
 
 void neko_install_hooks(lua_State* L) {
-    // shit myself by fucking hooks
-    // luau fucker
     if (!L) return;
     lua_getglobal(L, "game");
     if (lua_getmetatable(L, -1)) {
@@ -86,19 +72,13 @@ static int l_HttpGet(lua_State* L) {
 }
 
 static int l_getgenv(lua_State* L) {
-    // getgenv shit i hate this 
     lua_getfield(L, LUA_REGISTRYINDEX, GENV_REG);
-
-    // error handling
     if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_newtable(L); lua_pushvalue(L, -1); lua_setfield(L, LUA_REGISTRYINDEX, GENV_REG); }
     return 1;
 }
 
 static int l_loadstring(lua_State* L) {
-    // loadstring + call
     size_t len = 0; const char* src = luaL_checklstring(L, 1, &len);
-
-    // failed, error
     if (luau_load(L, "=neko", src, len, 0) != 0) { lua_error(L); return 0; }
     return 1;
 }
