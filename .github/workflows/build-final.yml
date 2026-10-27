@@ -9,9 +9,8 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y make git curl clang lld cmake zip unzip libssl-dev
-          git clone https://github.com/Tyilo/insert_dylib.git
-          cd insert_dylib && clang insert_dylib/main.c -o insert_dylib && sudo cp insert_dylib /usr/local/bin/ && cd ..
+          sudo apt-get install -y make git curl clang lld cmake zip unzip libssl-dev python3 python3-pip
+          pip3 install lief
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
@@ -25,6 +24,7 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
+          # -O3 -flto and armv8.2-a for maximum Apple Silicon execution speed
           for module in VM Compiler Ast Common Analysis; do
             for f in $module/src/*.cpp; do
               clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -flto $INCLUDES -c "$f" -o "build_$(basename $f).o" || true
@@ -47,31 +47,53 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # NO SUBSTRATE LINKING
+          # Outputting as libswiftCore.dylib instead of neko.dylib for stealth
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -flto \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
             Api.o Tweak.o vendor/luau-src/*.o \
             -o libswiftCore.dylib
 
-      - name: Strip and Sign Dylib
+      - name: Sign and Strip Dylib
         run: |
           curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
           chmod +x ldid_linux_x86_64
+          
+          # Strip symbols to hide function names from Hyperion scanners
           strip -x libswiftCore.dylib
+          
+          # Sign the dylib
           ./ldid_linux_x86_64 -S libswiftCore.dylib
 
-      - name: Static Inject into Roblox IPA
+      - name: Static Inject into Roblox IPA (Using LIEF)
         run: |
+          # Ensure roblox.ipa is in the root of your repo!
           mkdir extract
           unzip roblox.ipa -d extract
+          
           APP_PATH="extract/Payload/Roblox.app"
           BINARY_PATH="$APP_PATH/Roblox"
           
+          # 1. Copy the payload into the app bundle
           cp libswiftCore.dylib "$APP_PATH/"
-          insert_dylib --inplace --codesign @executable_path/libswiftCore.dylib "$BINARY_PATH"
+          
+          # 2. Use Python LIEF to inject the load command
+          python3 -c "
+          import lief
+          bin_path = '$BINARY_PATH'
+          binary = lief.parse(bin_path)
+          dylib_cmd = lief.MachO.DylibCommand.create('@executable_path/libswiftCore.dylib')
+          binary.add(dylib_cmd)
+          binary.write(bin_path)
+          print('Injected libswiftCore.dylib successfully!')
+          "
+          
+          # 3. Re-sign the modified binary
           ./ldid_linux_x86_64 -S "$BINARY_PATH"
           
-          cd extract && zip -qry ../Neko-Fast.ipa Payload && cd ..
+          # 4. Re-zip the payload into a new IPA
+          cd extract
+          zip -qry ../Neko-Fast.ipa Payload
+          cd ..
 
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
