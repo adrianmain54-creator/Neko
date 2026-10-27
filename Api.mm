@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #include "Neko.h"
 #include <dlfcn.h>
+#include <substrate.h>
 #include <string.h>
 
 static lua_State* g_L = nullptr;
@@ -13,26 +14,28 @@ struct Closure {
     union { struct { void* p; void* execdata; } l; struct { lua_CFunction f; void* cont; } c; };
 };
 
-// --- INSTANT VM CAPTURE ---
+// --- INSTANT VM CAPTURE VIA SUBSTRATE HOOK ---
 typedef lua_State* (*newstate_fn)(lua_Alloc, void*);
 static newstate_fn real_newstate = nullptr;
 
-// We use a constructor to hook the VM before Roblox even finishes loading
+static lua_State* hooked_newstate(lua_Alloc f, void* ud) {
+    lua_State* L = real_newstate(f, ud);
+    if (!g_L) {
+        g_L = L; // Save the pointer the instant Roblox creates it
+        NSLog(@"[Neko] Captured Lua State: %p", L);
+    }
+    return L;
+}
+
 __attribute__((constructor(101))) static void init_vm_hook() {
-    char str[13] = {'l','u','a','_','n','e','w','s','t','a','t','e','\0'};
-    void* addr = dlsym(RTLD_DEFAULT, str);
+    void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
     if (addr) {
         real_newstate = (newstate_fn)addr;
-        // In a real PC executor, this is where MSHookFunction/Dobby goes.
-        // For iOS stability, we just capture the pointer instantly when it runs.
+        MSHookFunction(addr, (void*)hooked_newstate, (void**)&real_newstate);
     }
 }
 
 lua_State* get_roblox_state() {
-    if (!g_L && real_newstate) {
-        // If we haven't captured it, force a tiny allocation to trigger it
-        // (Usually Roblox has already created it by the time UI loads)
-    }
     return g_L;
 }
 
@@ -124,7 +127,5 @@ void neko_register_api(lua_State* L) {
         lua_pushcfunction(L, l_HttpGet, "HttpGet"); lua_setfield(L, -2, "HttpGet");
         lua_pop(L, 1);
     }
-    lua_pop(L, 1);
-}
     lua_pop(L, 1);
 }
