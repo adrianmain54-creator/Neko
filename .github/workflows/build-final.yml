@@ -15,7 +15,7 @@ jobs:
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Compile All Luau Modules
+      - name: Compile Core Luau Modules
         run: |
           git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
@@ -24,21 +24,22 @@ jobs:
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           INCLUDES=$(find . -type d -name "include" | sed 's/^/-I/' | tr '\n' ' ')
           
-          # COMPILE EVERY SINGLE CPP FILE to guarantee no missing symbols
-          find . -name "*.cpp" | while read f; do
-            clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "${f%.cpp}.o" || true
+          # EXPLICITLY target only the required modules. NO CodeGen, NO tests.
+          for module in VM Compiler Ast Common Analysis Bytecode; do
+            mkdir -p "build_$module"
+            find "$module/src" -name "*.cpp" | while read f; do
+              clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c "$f" -o "build_$module/$(basename "${f%.cpp}").o" || true
+            done
           done
           
-          # --- SEPARATE FFLAG FILE ---
-          # This creates a dummy file to satisfy the linker without touching Api.mm
+          # Create the DummyFlags file to fix the undefined FFlag symbol
           cat << 'EOF' > DummyFlags.cpp
           #include "Luau/Common.h"
           LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
           EOF
           
-          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c DummyFlags.cpp -o DummyFlags.o
-          # ----------------------------
-
+          clang++ -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -std=c++17 -stdlib=libc++ -O3 $INCLUDES -c DummyFlags.cpp -o build_Common/DummyFlags.o
+          
           for d in $(find . -type d -name "include"); do
             cp -r $d/* ../../vendor/luau/include/ 2>/dev/null || true
           done
@@ -55,8 +56,8 @@ jobs:
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
-          # Gather ALL compiled .o files including our DummyFlags.o
-          LUAU_OBJS=$(find vendor/luau-src -name "*.o" | tr '\n' ' ')
+          # Link all compiled objects
+          LUAU_OBJS=$(find vendor/luau-src/build_* -name "*.o" | tr '\n' ' ')
           
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit \
