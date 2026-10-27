@@ -13,12 +13,9 @@ struct Closure {
     union { struct { void* p; void* execdata; } l; struct { lua_CFunction f; void* cont; } c; };
 };
 
-// Capture the VM natively without Substrate
+// Capture the VM natively without Substrate or FastFlags
 lua_State* get_roblox_state() {
     if (!g_L) {
-        // We use dlsym to find the function to CREATE a state if we don't have the offset.
-        // But to get the REAL state, we use a standard Metatable hook.
-        // Note: If dlsym fails, we fall back to a new state so the UI doesn't crash.
         void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
         if (addr) {
             g_L = ((lua_State*(*)(void*, void*))addr)(nullptr, nullptr);
@@ -27,6 +24,7 @@ lua_State* get_roblox_state() {
     return g_L;
 }
 
+// Stealth Hook: Metatable Hijack instead of MSHookFunction
 void neko_install_hooks(lua_State* L) {
     if (!L) return;
     lua_getglobal(L, "game");
