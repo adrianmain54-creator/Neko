@@ -3,6 +3,8 @@
 #include "Neko.h"
 #include <dlfcn.h>
 
+// stupid ass ui
+
 extern lua_State* get_roblox_state();
 
 @interface NekoUI : UIWindow
