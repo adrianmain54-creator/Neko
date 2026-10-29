@@ -28,6 +28,8 @@ jobs:
       - name: Download SDK & Substrate
         run: |
           git clone --depth 1 https://github.com/theos/sdks.git sdks
+          # Download substrate.h directly to the root folder
+          curl -L https://raw.githubusercontent.com/theos/headers/master/substrate.h -o substrate.h
           git clone --depth 1 https://github.com/theos/lib.git theos_lib
 
       - name: Compile Core Luau Modules
@@ -59,14 +61,15 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -fvisibility=hidden -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include -I$GITHUB_WORKSPACE/theos_lib/include"
+          # -I. will find substrate.h since we downloaded it to the root
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -fvisibility=hidden -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
           LUAU_OBJS=$(find vendor/luau-src/build_* -name "*.o" | tr '\n' ' ')
           
-          # -framework Security added for CommonCrypto
+          # Link against the framework
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -fvisibility=hidden \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit -framework Security \
             -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
