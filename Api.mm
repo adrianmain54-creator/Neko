@@ -1,467 +1,454 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <WebKit/WebKit.h>
-#include "Neko.h"
+#import <CommonCrypto/CommonCrypto.h>
 #include <dlfcn.h>
-#include <substrate.h>
+#include "Neko.h"
+#include <string.h>
+#include <pthread.h>
 
-typedef lua_State* (*newstate_fn)(lua_Alloc, void*);
-static newstate_fn real_newstate = nullptr;
+#define NEKO_GENV_KEY    "neko.genv"
+#define NEKO_MAX_TRACKED 64
 
-static lua_State* hooked_newstate(lua_Alloc f, void* ud) {
-    lua_State* L = real_newstate(f, ud);
-    if (!neko_get_state()) {
-        neko_set_state(L);
-        neko_install_hooks(L);
-    }
-    return L;
+static lua_State* g_injectedL = nullptr;
+static lua_State* g_mainL = nullptr;
+static lua_CFunction g_origNamecall = nullptr;
+static int g_scriptEnvRef = LUA_NOREF;
+static int g_gameEnvRef = LUA_NOREF;
+
+static __thread char t_namecallMethod[64] = {0};
+char g_namecallMethod[64] = {0};
+
+lua_State* neko_get_state(void) { return g_injectedL; }
+void neko_set_state(lua_State* L) { g_injectedL = L; }
+
+static lua_State* g_tracked[NEKO_MAX_TRACKED];
+static int g_trackedCount = 0;
+static pthread_mutex_t g_trackedMu = PTHREAD_MUTEX_INITIALIZER;
+
+static int is_tracked_state(lua_State* L) {
+    if (!L) return 0;
+    if (L == g_mainL) return 0;
+    int found = 0;
+    pthread_mutex_lock(&g_trackedMu);
+    for (int i = 0; i < g_trackedCount; i++) if (g_tracked[i] == L) { found = 1; break; }
+    pthread_mutex_unlock(&g_trackedMu);
+    return found;
 }
 
-__attribute__((constructor)) static void hook_init() {
-    void* addr = dlsym(RTLD_DEFAULT, "lua_newstate");
-    if (addr) {
-        real_newstate = (newstate_fn)addr;
-        MSHookFunction(addr, (void*)hooked_newstate, (void**)&real_newstate);
-    }
+void neko_track_state(lua_State* L) {
+    if (!L || is_tracked_state(L)) return;
+    pthread_mutex_lock(&g_trackedMu);
+    if (g_trackedCount < NEKO_MAX_TRACKED) g_tracked[g_trackedCount++] = L;
+    pthread_mutex_unlock(&g_trackedMu);
 }
 
-@interface NekoUI : UIWindow <WKScriptMessageHandler>
-@property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, assign) NSInteger currentStage;
-@end
-
-@implementation NekoUI
-
-- (instancetype)initWithScene:(UIWindowScene *)scene {
-    self = [super initWithWindowScene:scene];
-    if (self) {
-        self.frame = [UIScreen mainScreen].bounds;
-        self.windowLevel = 999999;
-        self.backgroundColor = [UIColor clearColor];
-        self.currentStage = 0;
-
-        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-        [config.userContentController addScriptMessageHandler:self name:@"nekoHandler"];
-        
-        self.webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:config];
-        self.webView.backgroundColor = [UIColor clearColor];
-        self.webView.opaque = NO;
-        self.webView.scrollView.scrollEnabled = NO;
-        self.webView.scrollView.bounces = NO;
-        
-        // YOUR EXACT UI
-        NSString *html = @R"HTML(
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Swipe UI</title>
-<style>
-:root{--bg:#f6f5f2;--panel:#fffefb;--ink:#1d1d1f;--mute:#6b6b70;--line:#1f6feb}
-@media (prefers-color-scheme:dark){:root{--bg:#17181b;--panel:#202226;--ink:#f1f1f3;--mute:#9a9aa2;--line:#5aa2ff}}
-
-html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--ink);
-font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;overscroll-behavior:none}
-
-.main{position:fixed;inset:0;z-index:0}
-
-.track{position:fixed;inset:0;z-index:1;display:flex;direction:rtl;overflow-x:auto;overflow-y:hidden;
-scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior:none;
--webkit-overflow-scrolling:touch;scrollbar-width:none}
-.track::-webkit-scrollbar{display:none}
-.track>*{flex:none;direction:ltr;height:100%;box-sizing:border-box}
-
-.spacer{width:100vw;scroll-snap-align:start;scroll-snap-stop:always}
-
-.peek{width:50px;position:relative;scroll-snap-align:end;scroll-snap-stop:always}
-
-.full{width:100vw;overflow-y:auto;overflow-x:hidden;scroll-snap-align:start;scroll-snap-stop:always;
-  color:var(--foreground);
-  font-family:"Sora",system-ui,sans-serif;
-  background:
-    radial-gradient(60% 50% at 10% 0%, oklch(0.9 0.035 140 / 70%), transparent),
-    radial-gradient(50% 45% at 100% 100%, oklch(0.88 0.09 100 / 55%), transparent),
-    var(--background);
-  padding:max(0.75rem, env(safe-area-inset-top)) 0.75rem max(1.5rem, env(safe-area-inset-bottom))}
-
-.handle{position:absolute;left:0;top:50%;width:46px;height:150px;margin-top:-75px;box-sizing:border-box;
-background:var(--gradient-glow);border-radius:0 80px 80px 0/0 75px 75px 0;
-box-shadow:var(--shadow-glow),0 8px 22px -6px oklch(0.52 0.12 152 / 45%),inset 0 1px 0 rgba(255,255,255,.5),inset -3px 0 8px rgba(255,255,255,.14);
-display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;transition:transform .15s}
-.handle:active{transform:scale(.94)}
-.handle svg{width:24px;height:24px;margin-left:-2px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3));animation:nudge 1.8s ease-in-out infinite}
-@keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
-@media (prefers-reduced-motion:reduce){.handle svg{animation:none}}
-
-  :root {
-    --background: oklch(0.965 0.014 95);
-    --foreground: oklch(0.3 0.035 155);
-    --primary: oklch(0.52 0.12 152);
-    --primary-foreground: oklch(0.98 0.012 95);
-    --secondary: oklch(0.9 0.035 140);
-    --muted-foreground: oklch(0.48 0.035 155);
-    --accent: oklch(0.88 0.09 100);
-    --destructive: oklch(0.6 0.19 25);
-    --border: oklch(0.35 0.04 155 / 16%);
-    --card: oklch(1 0 0 / 38%);
-    --radius: 1rem;
-    --gradient-glow: linear-gradient(135deg, var(--primary), var(--accent));
-    --shadow-glass: 0 18px 45px -18px oklch(0.32 0.05 155 / 28%), inset 0 1px 0 oklch(1 0 0 / 65%);
-    --shadow-glow: 0 0 28px -6px oklch(0.52 0.12 152 / 45%);
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; border-color: var(--border); }
-  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
-
-  .glass {
-    background: var(--card);
-    backdrop-filter: blur(5px) saturate(150%);
-    -webkit-backdrop-filter: blur(5px) saturate(150%);
-    background-image: linear-gradient(135deg, oklch(1 0 0 / 35%), transparent 45%, oklch(1 0 0 / 12%));
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-glass);
-  }
-  .glow {
-    background: var(--gradient-glow);
-    color: var(--primary-foreground);
-    box-shadow: var(--shadow-glow);
-  }
-
-  .app { max-width: 64rem; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-  @media (min-width: 768px) {
-    .app { grid-template-columns: 5rem 1fr 18rem; }
-    .rail { grid-row: span 2; }
-    .main-col { grid-column: 2; }
-    .side-col { grid-column: 3; }
-  }
-  @media (max-width: 767px) {
-    .rail { grid-row: span 2; flex-direction: row; justify-content: space-around; }
-    .rail nav { flex-direction: row; }
-    .side-col { grid-column: span 2; }
-  }
-
-  .rail { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.5rem; }
-  .logo { width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 0.75rem; font-weight: 700; font-size: 0.875rem; margin-bottom: 0.5rem; }
-  .rail nav { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; }
-  .tab-btn { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; width: 100%; padding: 0.5rem 0.25rem; border-radius: 0.75rem; font-size: 0.6875rem; font-weight: 500; color: var(--muted-foreground); text-decoration: none; text-align: center; }
-  .tab-btn span { font-size: 1rem; }
-  .ico { position: relative; display: block; width: 16px; height: 16px; color: inherit; flex: none; }
-  .tab-btn .ico { margin-bottom: 2px; }
-  .ico-sliders b { position: absolute; left: 1px; right: 1px; height: 2px; border-radius: 2px; background: currentColor; }
-  .ico-sliders b:first-child { top: 4px; }
-  .ico-sliders b:last-child { bottom: 4px; }
-  .ico-sliders b::after { content: ""; position: absolute; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .ico-sliders b:first-child::after { right: 0; }
-  .ico-sliders b:last-child::after { left: 0; }
-  .tab-btn:hover { background: var(--secondary); }
-  .version { margin-top: auto; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: oklch(0.48 0.035 155 / 70%); }
-
-  .tab-state { display: none; }
-  #tab-exec:checked ~ .app label[for="tab-exec"],
-  #tab-scripts:checked ~ .app label[for="tab-scripts"],
-  #tab-settings:checked ~ .app label[for="tab-settings"] { background: oklch(0.52 0.12 152 / 15%); color: var(--primary); }
-  #tab-exec:checked ~ .app .panel-exec,
-  #tab-scripts:checked ~ .app .panel-scripts,
-  #tab-settings:checked ~ .app .panel-settings { display: flex; }
-  .panel { display: none; }
-
-  .panel-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; }
-  .panel-title { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
-  .run-btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
-
-  .editor-shell { display: flex; flex-direction: column; overflow: hidden; }
-  textarea { height: 40vh; min-height: 14rem; resize: none; background: transparent; border: 0; outline: 0; padding: 1rem; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 16px; line-height: 1.5; color: var(--foreground); caret-color: var(--primary); -webkit-appearance: none; }
-  .panel-body { padding: 1rem; height: 40vh; min-height: 14rem; overflow-y: auto; }
-
-  .script-row { display: flex; align-items: center; justify-content: space-between; background: var(--secondary); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; margin-bottom: 0.5rem; }
-  .script-row small { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground); }
-
-  .setting-row { display: flex; align-items: center; justify-content: space-between; background: var(--secondary); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; margin-bottom: 0.75rem; }
-  .size-pick { display: flex; gap: 0.25rem; }
-  .size-pick label { padding: 0.25rem 0.5rem; border-radius: 0.375rem; font-size: 0.75rem; cursor: pointer; }
-  #sz-12:checked ~ .app label[for="sz-12"],
-  #sz-14:checked ~ .app label[for="sz-14"],
-  #sz-16:checked ~ .app label[for="sz-16"],
-  #sz-18:checked ~ .app label[for="sz-18"] { background: var(--gradient-glow); color: var(--primary-foreground); box-shadow: var(--shadow-glow); }
-  .size-state { display: none; }
-  #sz-12:checked ~ .app textarea { font-size: 12px; }
-  #sz-14:checked ~ .app textarea { font-size: 14px; }
-  #sz-16:checked ~ .app textarea { font-size: 16px; }
-  #sz-18:checked ~ .app textarea { font-size: 18px; }
-
-  .toggle { position: relative; width: 2.75rem; height: 1.5rem; }
-  .toggle input { opacity: 0; width: 100%; height: 100%; position: absolute; cursor: pointer; }
-  .toggle i { position: absolute; inset: 0; pointer-events: none; border-radius: 999px; background: oklch(0.35 0.04 155 / 25%); transition: background 0.2s; }
-  .toggle i::after { content: ""; position: absolute; top: 0.125rem; left: 0.125rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: #fff; transition: transform 0.2s; }
-  .toggle input:checked + i { background: var(--primary); }
-  .toggle input:checked + i::after { transform: translateX(1.25rem); }
-
-  .main-col { display: flex; flex-direction: column; gap: 0.75rem; }
-  .logs { padding-bottom: 0; }
-  .logs-body { max-height: 10rem; min-height: 6rem; overflow-y: auto; padding: 1rem; font-size: 0.75rem; line-height: 1.5; color: var(--muted-foreground); }
-
-  .side-col { display: flex; flex-direction: column; gap: 0.75rem; }
-  .console { display: flex; flex-direction: column; flex: 1; }
-  .console-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0.5rem 1rem; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground); }
-  .console-body { min-height: 12rem; flex: 1; overflow-y: auto; padding: 1rem; font-size: 0.75rem; line-height: 1.5; }
-  .out-err { color: var(--destructive); }
-  .out-info { color: var(--muted-foreground); }
-
-  .user { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; }
-  .avatar { width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 50%; font-size: 0.875rem; }
-  .user strong { font-weight: 600; }
-  .user small { margin-left: auto; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground); }
-</style>
-</head>
-<body>
-
-<div class="main"></div>
-
-<div class="track">
-  <section class="spacer"></section>
-
-  <section class="peek">
-    <a class="handle" href="#full" aria-label="Open executor">
-      <svg viewBox="0 0 24 24" fill="none" stroke="oklch(0.98 0.012 95)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5 16.5 12 9 19.5"/></svg>
-    </a>
-  </section>
-
-  <section class="full" id="full">
-
-<input class="tab-state" type="radio" name="tab" id="tab-exec" checked />
-<input class="tab-state" type="radio" name="tab" id="tab-scripts" />
-<input class="tab-state" type="radio" name="tab" id="tab-settings" />
-
-<input class="size-state" type="radio" name="size" id="sz-12" />
-<input class="size-state" type="radio" name="size" id="sz-14" />
-<input class="size-state" type="radio" name="size" id="sz-16" checked />
-<input class="size-state" type="radio" name="size" id="sz-18" />
-
-<div class="app">
-
-  <aside class="rail glass">
-    <div class="logo glow mono">N</div>
-    <nav>
-      <label class="tab-btn" for="tab-exec"><span>⌘</span>Exec</label>
-      <label class="tab-btn" for="tab-scripts"><span>≡</span>Scripts</label>
-      <label class="tab-btn" for="tab-settings"><i class="ico ico-sliders"><b></b><b></b></i>Settings</label>
-    </nav>
-    <span class="version mono">v0.1</span>
-  </aside>
-
-  <div class="main-col">
-    <section class="editor-shell glass">
-
-      <div class="panel panel-exec" style="flex-direction: column; width: 100%;">
-        <div class="panel-head">
-          <span class="panel-title mono">main.luau</span>
-          <span class="run-btn glow mono" id="runBtn">▶ Run</span>
-        </div>
-        <textarea id="codeEditor" spellcheck="false" autocapitalize="off" autocorrect="off">-- Neko
-local name = "world"
-print("Hello, " .. name)</textarea>
-      </div>
-
-      <div class="panel panel-scripts" style="flex-direction: column; width: 100%;">
-        <div class="panel-head">
-          <span class="panel-title mono">scripts/</span>
-        </div>
-        <div class="panel-body">
-          <div class="script-row mono">Hello World <small>load</small></div>
-          <div class="script-row mono">Quick Math <small>load</small></div>
-        </div>
-      </div>
-
-      <div class="panel panel-settings" style="flex-direction: column; width: 100%;">
-        <div class="panel-head">
-          <span class="panel-title mono">settings</span>
-        </div>
-        <div class="panel-body">
-          <div class="setting-row">
-            <span>Editor text size</span>
-            <div class="size-pick mono">
-              <label for="sz-12">12</label>
-              <label for="sz-14">14</label>
-              <label for="sz-16">16</label>
-              <label for="sz-18">18</label>
-            </div>
-          </div>
-          <div class="setting-row">
-            <span>Clear console before each run</span>
-            <span class="toggle"><input type="checkbox" /><i></i></span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="glass">
-      <div class="panel-head">
-        <span class="panel-title mono" style="font-size: 11px; color: var(--muted-foreground);">// logs</span>
-      </div>
-      <div class="logs-body mono" id="logsOutput">
-        <div>Neko loaded</div>
-      </div>
-    </section>
-  </div>
-
-  <div class="side-col">
-    <section class="console glass">
-      <div class="console-head mono">
-        <span>&gt;_ console</span>
-        <span style="font-size: 10px;">clear</span>
-      </div>
-      <div class="console-body mono" id="consoleOutput">
-        <div class="out-info">Console ready.</div>
-        <div>Hello, world</div>
-      </div>
-    </section>
-
-    <div class="user glass">
-      <div class="avatar glow">U</div>
-      <strong>User</strong>
-      <small class="mono">online</small>
-    </div>
-  </div>
-
-</div>
-
-  </section>
-</div>
-
-<!-- INVISIBLE NATIVE BRIDGE -->
-<script>
-    var track = document.querySelector('.track');
-    track.addEventListener('scroll', function() {
-        var scrollPos = Math.abs(track.scrollLeft);
-        if (scrollPos > window.innerWidth * 1.5) {
-            window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_FULL");
-        } else if (scrollPos > 50) {
-            window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_PEEK");
-        } else {
-            window.webkit.messageHandlers.nekoHandler.postMessage("STAGE_CLOSED");
-        }
-    });
-
-    document.getElementById('runBtn').addEventListener('click', function() {
-        var code = document.getElementById('codeEditor').value;
-        if (code) {
-            window.webkit.messageHandlers.nekoHandler.postMessage("EXEC:" + code);
-        }
-    });
-
-    function appendConsole(msg, isError) {
-        var consoleDiv = document.getElementById('consoleOutput');
-        var newDiv = document.createElement('div');
-        newDiv.innerText = msg;
-        if (isError) newDiv.className = 'out-err';
-        consoleDiv.appendChild(newDiv);
-        consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        
-        var logsDiv = document.getElementById('logsOutput');
-        if (logsDiv) {
-            var logDiv = document.createElement('div');
-            logDiv.innerText = msg;
-            logsDiv.appendChild(logDiv);
-            logsDiv.scrollTop = logsDiv.scrollHeight;
+void neko_untrack_state(lua_State* L) {
+    pthread_mutex_lock(&g_trackedMu);
+    for (int i = 0; i < g_trackedCount; i++) {
+        if (g_tracked[i] == L) {
+            g_tracked[i] = g_tracked[--g_trackedCount];
+            g_tracked[g_trackedCount] = nullptr;
+            break;
         }
     }
-</script>
-
-</body>
-</html>
-)HTML";
-        
-        [self.webView loadHTMLString:html baseURL:nil];
-        [self addSubview:self.webView];
-    }
-    return self;
+    pthread_mutex_unlock(&g_trackedMu);
 }
 
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.currentStage == 0) {
-        if (point.x < self.bounds.size.width * 0.3) {
-            return self.webView;
-        }
-        return nil;
-    }
-    return self.webView;
+static int l_scriptenv_index(lua_State* L) {
+    if (!lua_isstring(L, 2)) { lua_pushnil(L); return 1; }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_gameEnvRef);
+    lua_pushvalue(L, 2);
+    lua_gettable(L, -2);
+    return 1;
 }
 
-- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
-    if (![message.body isKindOfClass:[NSString class]]) return;
-    NSString *body = message.body;
+static void ensure_envs(lua_State* L) {
+    if (g_scriptEnvRef != LUA_NOREF) return;
     
-    if ([body isEqualToString:@"STAGE_FULL"]) { self.currentStage = 2; return; }
-    if ([body isEqualToString:@"STAGE_PEEK"]) { self.currentStage = 1; return; }
-    if ([body isEqualToString:@"STAGE_CLOSED"]) { self.currentStage = 0; return; }
-    
-    if ([body hasPrefix:@"EXEC:"]) {
-        NSString *code = [body substringFromIndex:5];
-        [self executeScript:code];
-        return;
+    // FIX: LUA_RIDX_GLOBALS doesn't exist in Luau, use LUA_GLOBALSINDEX
+    lua_pushvalue(L, LUA_GLOBALSINDEX);
+    g_gameEnvRef = lua_ref(L, LUA_REGISTRYINDEX);
+
+    lua_newtable(L);
+    lua_newtable(L);
+    lua_pushcfunction(L, l_scriptenv_index, "__index");
+    lua_setfield(L, -2, "__index");
+    lua_setmetatable(L, -2);
+    g_scriptEnvRef = lua_ref(L, LUA_REGISTRYINDEX);
+}
+
+static void env_set(lua_State* L, const char* name, lua_CFunction fn) {
+    lua_pushcfunction(L, fn, name);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_scriptEnvRef);
+    lua_insert(L, -2);
+    lua_setfield(L, -2, name);
+    lua_pop(L, 1);
+}
+
+static int neko_namecall_hook(lua_State* L);
+
+// FIX: lua_KContext doesn't exist in Luau, use intptr_t
+static int namecall_cont(lua_State* L, int status, intptr_t ctx) {
+    (void)ctx;
+    if (status != LUA_OK && status != LUA_YIELD) { lua_error(L); return 0; }
+    return lua_gettop(L);
+}
+
+static int passthrough(lua_State* L) {
+    if (!g_origNamecall) { lua_pushnil(L); return 1; }
+    int nargs = lua_gettop(L) - 1;
+    if (nargs < 0) { lua_pushnil(L); return 1; }
+    lua_pushcfunction(L, g_origNamecall, "orig");
+    lua_insert(L, 1);
+    lua_callk(L, nargs, LUA_MULTRET, 0, namecall_cont);
+    return lua_gettop(L);
+}
+
+static int neko_namecall_hook(lua_State* L) {
+    if (is_tracked_state(L)) {
+        const char* m = lua_namecallatom(L, nullptr);
+        if (m) {
+            strncpy(t_namecallMethod, m, 63);
+            t_namecallMethod[63] = 0;
+            memcpy(g_namecallMethod, t_namecallMethod, 64);
+        }
     }
+    return passthrough(L);
 }
 
-- (void)executeScript:(NSString *)code {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        lua_State* L = neko_get_state();
-        if (!L) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.webView evaluateJavaScript:@"appendConsole('Error: VM not ready.', true);" completionHandler:nil];
-            });
-            return;
-        }
+void neko_install_hooks(lua_State* L) {
+    if (!L) return;
+    if (!g_injectedL) g_injectedL = L;
+    if (!g_mainL)     g_mainL     = L;
+    ensure_envs(L);
 
-        lua_State* T = lua_newthread(L);
-        neko_track_state(T);
-        neko_register_api(T);
+    lua_getglobal(L, "game");
+    if (!lua_getmetatable(L, -1)) { lua_pop(L, 1); return; }
 
-        NSString *resultMsg = @"";
-        BOOL isError = NO;
+    lua_getfield(L, -1, "__namecall");
+    if (lua_iscfunction(L, -1) && !g_origNamecall) g_origNamecall = lua_tocfunction(L, -1);
+    lua_pop(L, 1);
+    if (!g_origNamecall) { lua_pop(L, 2); return; }
 
-        if (luau_load(T, "=console", code.UTF8String, strlen(code.UTF8String), 0) != 0) {
-            const char* err = lua_tostring(T, -1);
-            resultMsg = [NSString stringWithFormat:@"[Syntax Error] %s", err ? err : "Unknown"];
-            isError = YES;
-        } else if (lua_pcall(T, 0, 0, 0) != 0) {
-            const char* err = lua_tostring(T, -1);
-            resultMsg = [NSString stringWithFormat:@"[Runtime Error] %s", err ? err : "Unknown"];
-            isError = YES;
-        } else {
-            resultMsg = @"[Success] Executed!";
-        }
-
-        neko_untrack_state(T);
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *js = [NSString stringWithFormat:@"appendConsole('%@', %@);", resultMsg, isError ? @"true" : @"false"];
-            [self.webView evaluateJavaScript:js completionHandler:nil];
-        });
-    });
+    lua_setreadonly(L, -1, 0);
+    lua_pushcclosure(L, neko_namecall_hook, "namecall", 0);
+    lua_setfield(L, -2, "__namecall");
+    lua_setreadonly(L, -1, 1);
+    lua_pop(L, 2);
 }
 
-@end
+static int l_getgenv(lua_State* L) {
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_scriptEnvRef);
+    return 1;
+}
 
-static NekoUI *g_ui = nil;
+static int l_getrenv(lua_State* L) {
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_gameEnvRef);
+    return 1;
+}
 
-__attribute__((constructor)) static void init() {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindowScene *activeScene = nil;
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if (s.activationState == UISceneActivationStateForegroundActive && [s isKindOfClass:[UIWindowScene class]]) {
-                activeScene = (UIWindowScene *)s;
-                break;
-            }
+static int l_getreg(lua_State* L) { lua_pushvalue(L, LUA_REGISTRYINDEX); return 1; }
+
+static int l_loadstring(lua_State* L) {
+    size_t len = 0;
+    const char* src = luaL_checklstring(L, 1, &len);
+    if (luau_load(L, "=neko", src, len, 0) != 0) { lua_error(L); return 0; }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_scriptEnvRef);
+    lua_setfenv(L, -2);
+    return 1;
+}
+
+static int l_identify(lua_State* L)          { lua_pushliteral(L, "Neko/1.2"); return 1; }
+static int l_getnamecallmethod(lua_State* L) {
+    if (t_namecallMethod[0]) lua_pushstring(L, t_namecallMethod);
+    else                     lua_pushnil(L);
+    return 1;
+}
+static int l_checkcaller(lua_State* L)       { lua_pushboolean(L, is_tracked_state(L)); return 1; }
+
+static int l_getrawmetatable(lua_State* L) {
+    luaL_checkany(L, 1);
+    if (lua_getmetatable(L, 1)) return 1;
+    lua_pushnil(L); return 1;
+}
+
+static int l_setrawmetatable(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    if (!lua_isnil(L, 2)) luaL_checktype(L, 2, LUA_TTABLE);
+    lua_setmetatable(L, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_islclosed(lua_State* L) {
+    luaL_checkany(L, 1);
+    int has = lua_getmetatable(L, 1);
+    if (has) lua_pop(L, 1);
+    lua_pushboolean(L, !has);
+    return 1;
+}
+
+static int l_setreadonly(lua_State* L) { luaL_checktype(L, 1, LUA_TTABLE); lua_setreadonly(L, 1, lua_toboolean(L, 2)); return 0; }
+static int l_isreadonly(lua_State* L)  { luaL_checktype(L, 1, LUA_TTABLE); lua_pushboolean(L, lua_getreadonly(L, 1)); return 1; }
+
+static int l_setclipboard(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    [UIPasteboard generalPasteboard].string =
+        [[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding];
+    return 0;
+}
+
+static int l_getclipboard(lua_State* L) {
+    NSString* s = [UIPasteboard generalPasteboard].string;
+    if (s) lua_pushlstring(L, [s UTF8String], [s lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+    else   lua_pushnil(L);
+    return 1;
+}
+
+static int l_newcclosure(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushvalue(L, 1);
+    return 1;
+}
+
+static int l_iscclosure(lua_State* L) {
+    luaL_checkany(L, 1);
+    lua_pushboolean(L, lua_iscfunction(L, 1));
+    return 1;
+}
+
+static int l_islclosure(lua_State* L) {
+    luaL_checkany(L, 1);
+    lua_pushboolean(L, !lua_iscfunction(L, 1) && lua_isfunction(L, 1));
+    return 1;
+}
+
+static int l_isexecutorclosure(lua_State* L) {
+    luaL_checkany(L, 1);
+    if (!lua_isfunction(L, 1)) { lua_pushboolean(L, 0); return 1; }
+    lua_CFunction f = lua_tocfunction(L, 1);
+    if (!f) { lua_pushboolean(L, 0); return 1; }
+    Dl_info info;
+    if (dladdr((const void*)f, &info) && info.dli_fname) {
+        const char* p = info.dli_fname;
+        const char* base = strrchr(p, '/');
+        base = base ? base + 1 : p;
+        if (strstr(base, "Neko") || strstr(base, "neko") || strstr(base, "swift")) {
+            lua_pushboolean(L, 1);
+            return 1;
         }
-        if (activeScene) {
-            g_ui = [[NekoUI alloc] initWithScene:activeScene];
-            UIViewController *rootVC = [[UIViewController alloc] init];
-            rootVC.view.backgroundColor = [UIColor clearColor];
-            rootVC.view.userInteractionEnabled = NO; 
-            g_ui.rootViewController = rootVC;
-            [g_ui makeKeyAndVisible];
-        }
-    });
+    }
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int l_getfenv_real(lua_State* L) {
+    luaL_checkany(L, 1);
+    if (lua_isfunction(L, 1) || lua_isnumber(L, 1)) lua_getfenv(L, 1);
+    else lua_pushnil(L);
+    return 1;
+}
+
+static int l_setfenv_real(lua_State* L) {
+    luaL_checkany(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    lua_setfenv(L, 1);
+    return 0;
+}
+
+static int l_getsenv(lua_State* L) {
+    luaL_checkany(L, 1);
+    if (lua_isfunction(L, 1)) {
+        lua_getfenv(L, 1);
+        return 1;
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+// FIX: Luau debug struct lacks lastlinedefined/namewhat and has different lua_getinfo
+static int l_debug_info(lua_State* L) {
+    lua_Debug ar;
+    if (lua_isfunction(L, 1)) {
+        lua_pushvalue(L, 1);
+        if (!lua_getinfo(L, 0, "Slnf", &ar)) { lua_pushnil(L); return 1; }
+    } else {
+        int level = (int)luaL_checkinteger(L, 1);
+        if (!lua_getinfo(L, level, "nSluf", &ar)) { lua_pushnil(L); return 1; }
+    }
+    lua_newtable(L);
+    lua_pushstring(L, ar.source ? ar.source : "");      lua_setfield(L, -2, "source");
+    lua_pushstring(L, ar.short_src ? ar.short_src : "");lua_setfield(L, -2, "short_src");
+    lua_pushinteger(L, ar.linedefined);                 lua_setfield(L, -2, "linedefined");
+    lua_pushinteger(L, ar.currentline);                 lua_setfield(L, -2, "currentline");
+    lua_pushstring(L, ar.what ? ar.what : "");          lua_setfield(L, -2, "what");
+    lua_pushstring(L, ar.name ? ar.name : "");          lua_setfield(L, -2, "name");
+    return 1;
+}
+
+static int l_debug_traceback(lua_State* L) {
+    const char* msg = luaL_optstring(L, 1, "");
+    luaL_traceback(L, L, msg, 1);
+    return 1;
+}
+
+static int l_debug_profilebegin(lua_State* L)        { (void)L; return 0; }
+static int l_debug_profileend(lua_State* L)          { (void)L; return 0; }
+static int l_debug_setmemorycategory(lua_State* L)   { (void)L; return 0; }
+static int l_debug_resetmemorycategory(lua_State* L) { (void)L; return 0; }
+
+static int l_getthreadidentity(lua_State* L) { lua_pushinteger(L, 8); return 1; }
+static int l_setthreadidentity(lua_State* L) { luaL_checkinteger(L, 1); return 0; }
+
+static int l_crypt_base64encode(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    NSData* d = [NSData dataWithBytes:s length:len];
+    NSString* b64 = [d base64EncodedStringWithOptions:0];
+    if (!b64) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, [b64 UTF8String]);
+    return 1;
+}
+
+// FIX: NSData base64 decoder and remove [d release] for ARC
+static int l_crypt_base64decode(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    NSString *b64String = [[NSString alloc] initWithBytes:s length:len encoding:NSUTF8StringEncoding];
+    if (!b64String) { lua_pushnil(L); return 1; }
+    NSData* d = [[NSData alloc] initWithBase64EncodedString:b64String options:0];
+    if (!d) { lua_pushnil(L); return 1; }
+    lua_pushlstring(L, (const char*)d.bytes, d.length);
+    return 1;
+}
+
+static int l_crypt_hash(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    NSString* algo = [NSString stringWithUTF8String:luaL_optstring(L, 2, "sha256")];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    size_t dlen = CC_SHA256_DIGEST_LENGTH;
+    if ([algo caseInsensitiveCompare:@"md5"] == NSOrderedSame) {
+        CC_MD5(s, (CC_LONG)len, digest); dlen = CC_MD5_DIGEST_LENGTH;
+    } else if ([algo caseInsensitiveCompare:@"sha1"] == NSOrderedSame) {
+        CC_SHA1(s, (CC_LONG)len, digest); dlen = CC_SHA1_DIGEST_LENGTH;
+    } else {
+        CC_SHA256(s, (CC_LONG)len, digest);
+    }
+    NSMutableString* hex = [NSMutableString stringWithCapacity:dlen * 2];
+    for (size_t i = 0; i < dlen; i++) [hex appendFormat:@"%02x", digest[i]];
+    lua_pushstring(L, [hex UTF8String]);
+    return 1;
+}
+
+static int l_crypt_generatekey(lua_State* L) {
+    int bits = (int)luaL_optinteger(L, 1, 32);
+    if (bits <= 0 || bits > 256) { lua_pushnil(L); return 1; }
+    unsigned char buf[256];
+    arc4random_buf(buf, (size_t)bits);
+    NSData* d = [NSData dataWithBytes:buf length:(NSUInteger)bits];
+    lua_pushstring(L, [[d base64EncodedStringWithOptions:0] UTF8String]);
+    return 1;
+}
+
+static int l_crypt_encrypt(lua_State* L) { (void)L; lua_pushnil(L); return 1; }
+static int l_crypt_decrypt(lua_State* L) { (void)L; lua_pushnil(L); return 1; }
+
+static int l_HttpGet(lua_State* L) {
+    size_t ulen = 0;
+    const char* url = luaL_checklstring(L, 1, &ulen);
+    NSURL* u = [NSURL URLWithString:[[NSString alloc] initWithBytes:url length:ulen encoding:NSUTF8StringEncoding]];
+    if (!u) { lua_pushnil(L); return 1; }
+    NSMutableURLRequest* req = [NSMutableURLRequest requestWithURL:u];
+    [req setValue:@"RobloxApp/0.592.0 (iOS)" forHTTPHeaderField:@"User-Agent"];
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block NSData* data = nil;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData* d, NSURLResponse* r, NSError* e) {
+        if (d) data = d;
+        dispatch_semaphore_signal(sem);
+    }] resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (data) { lua_pushlstring(L, (const char*)data.bytes, data.length); return 1; }
+    lua_pushnil(L); return 1;
+}
+
+static int l_request(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "Url");
+    if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_pushnil(L); return 1; }
+    lua_replace(L, 1);
+    return l_HttpGet(L);
+}
+
+static int l_getcallingscript(lua_State* L)  { (void)L; lua_pushnil(L); return 1; }
+static int l_getscriptclosure(lua_State* L)  { (void)L; lua_pushnil(L); return 1; }
+static int l_fireclickdetector(lua_State* L) { (void)L; lua_pushnil(L); return 1; }
+static int l_firetouchinterest(lua_State* L) { (void)L; lua_pushnil(L); return 1; }
+static int l_queue_on_teleport(lua_State* L) { (void)L; lua_pushnil(L); return 1; }
+
+void neko_register_api(lua_State* L) {
+    ensure_envs(L);
+
+    env_set(L, "getgenv",           l_getgenv);
+    env_set(L, "getrenv",           l_getrenv);
+    env_set(L, "getreg",            l_getreg);
+    env_set(L, "loadstring",        l_loadstring);
+    env_set(L, "identifyexecutor",  l_identify);
+    env_set(L, "getnamecallmethod", l_getnamecallmethod);
+    env_set(L, "getrawmetatable",   l_getrawmetatable);
+    env_set(L, "setrawmetatable",   l_setrawmetatable);
+    env_set(L, "islclosed",         l_islclosed);
+    env_set(L, "setreadonly",       l_setreadonly);
+    env_set(L, "isreadonly",        l_isreadonly);
+    env_set(L, "checkcaller",       l_checkcaller);
+    env_set(L, "setclipboard",      l_setclipboard);
+    env_set(L, "toclipboard",       l_setclipboard);
+    env_set(L, "getclipboard",      l_getclipboard);
+
+    env_set(L, "newcclosure",       l_newcclosure);
+    env_set(L, "iscclosure",        l_iscclosure);
+    env_set(L, "islclosure",        l_islclosure);
+    env_set(L, "isexecutorclosure", l_isexecutorclosure);
+    env_set(L, "getfenv",           l_getfenv_real);
+    env_set(L, "setfenv",           l_setfenv_real);
+    env_set(L, "getsenv",           l_getsenv);
+    env_set(L, "getthreadidentity", l_getthreadidentity);
+    env_set(L, "setthreadidentity", l_setthreadidentity);
+    env_set(L, "getcallingscript",  l_getcallingscript);
+    env_set(L, "getscriptclosure",  l_getscriptclosure);
+    env_set(L, "fireclickdetector", l_fireclickdetector);
+    env_set(L, "firetouchinterest", l_firetouchinterest);
+    env_set(L, "queue_on_teleport", l_queue_on_teleport);
+    env_set(L, "queueonteleport",   l_queue_on_teleport);
+    env_set(L, "HttpGet",           l_HttpGet);
+    env_set(L, "http_request",      l_HttpGet);
+    env_set(L, "request",           l_request);
+
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_scriptEnvRef);
+    lua_newtable(L);
+    lua_pushcfunction(L, l_crypt_base64encode, "base64encode"); lua_setfield(L, -2, "base64encode");
+    lua_pushcfunction(L, l_crypt_base64decode, "base64decode"); lua_setfield(L, -2, "base64decode");
+    lua_pushcfunction(L, l_crypt_hash,         "hash");         lua_setfield(L, -2, "hash");
+    lua_pushcfunction(L, l_crypt_generatekey,  "generatekey");  lua_setfield(L, -2, "generatekey");
+    lua_pushcfunction(L, l_crypt_encrypt,      "encrypt");      lua_setfield(L, -2, "encrypt");
+    lua_pushcfunction(L, l_crypt_decrypt,      "decrypt");      lua_setfield(L, -2, "decrypt");
+    lua_setfield(L, -2, "crypt");
+    lua_newtable(L);
+    lua_pushcfunction(L, l_crypt_base64encode, "encode"); lua_setfield(L, -2, "encode");
+    lua_pushcfunction(L, l_crypt_base64decode, "decode"); lua_setfield(L, -2, "decode");
+    lua_setfield(L, -2, "base64");
+    lua_pop(L, 1);
+
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_scriptEnvRef);
+    lua_getfield(L, -1, "debug");
+    if (lua_istable(L, -1)) {
+        lua_pushcfunction(L, l_debug_info,               "info");               lua_setfield(L, -2, "info");
+        lua_pushcfunction(L, l_debug_traceback,          "traceback");          lua_setfield(L, -2, "traceback");
+        lua_pushcfunction(L, l_debug_profilebegin,       "profilebegin");       lua_setfield(L, -2, "profilebegin");
+        lua_pushcfunction(L, l_debug_profileend,         "profileend");         lua_setfield(L, -2, "profileend");
+        lua_pushcfunction(L, l_debug_setmemorycategory,  "setmemorycategory");  lua_setfield(L, -2, "setmemorycategory");
+        lua_pushcfunction(L, l_debug_resetmemorycategory,"resetmemorycategory");lua_setfield(L, -2, "resetmemorycategory");
+    }
+    lua_pop(L, 2);
 }
