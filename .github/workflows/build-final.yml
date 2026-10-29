@@ -29,7 +29,6 @@ jobs:
           cd build
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          # FIX: Added -DCMAKE_SYSTEM_PROCESSOR=arm64
           cmake .. -DCMAKE_SYSTEM_NAME=iOS \
                    -DCMAKE_SYSTEM_PROCESSOR=arm64 \
                    -DCMAKE_OSX_ARCHITECTURES="arm64" \
@@ -39,7 +38,9 @@ jobs:
                    -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
                    -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
                    -DCMAKE_BUILD_TYPE=Release
-          make -j4
+          
+          # ONLY build the static target
+          make dobby_static -j4
 
       - name: Compile Core Luau Modules
         run: |
@@ -129,11 +130,6 @@ jobs:
           name: libswiftCore-dylib
           path: libswiftCore.dylib
 
-      - name: Upload Final IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Neko-Fast-IPA
-          path: Neko-Fast.ipa
       - name: Upload Final IPA
         uses: actions/upload-artifact@v4
         with:
