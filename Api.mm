@@ -65,7 +65,6 @@ static int l_scriptenv_index(lua_State* L) {
 static void ensure_envs(lua_State* L) {
     if (g_scriptEnvRef != LUA_NOREF) return;
     
-    // FIX: LUA_RIDX_GLOBALS doesn't exist in Luau, use LUA_GLOBALSINDEX
     lua_pushvalue(L, LUA_GLOBALSINDEX);
     g_gameEnvRef = lua_ref(L, LUA_REGISTRYINDEX);
 
@@ -87,20 +86,14 @@ static void env_set(lua_State* L, const char* name, lua_CFunction fn) {
 
 static int neko_namecall_hook(lua_State* L);
 
-// FIX: lua_KContext doesn't exist in Luau, use intptr_t
-static int namecall_cont(lua_State* L, int status, intptr_t ctx) {
-    (void)ctx;
-    if (status != LUA_OK && status != LUA_YIELD) { lua_error(L); return 0; }
-    return lua_gettop(L);
-}
-
+// FIX: Removed lua_callk and namecall_cont. Using standard lua_call.
 static int passthrough(lua_State* L) {
     if (!g_origNamecall) { lua_pushnil(L); return 1; }
     int nargs = lua_gettop(L) - 1;
     if (nargs < 0) { lua_pushnil(L); return 1; }
     lua_pushcfunction(L, g_origNamecall, "orig");
     lua_insert(L, 1);
-    lua_callk(L, nargs, LUA_MULTRET, 0, namecall_cont);
+    lua_call(L, nargs, LUA_MULTRET);
     return lua_gettop(L);
 }
 
@@ -267,7 +260,6 @@ static int l_getsenv(lua_State* L) {
     return 1;
 }
 
-// FIX: Luau debug struct lacks lastlinedefined/namewhat and has different lua_getinfo
 static int l_debug_info(lua_State* L) {
     lua_Debug ar;
     if (lua_isfunction(L, 1)) {
@@ -311,7 +303,6 @@ static int l_crypt_base64encode(lua_State* L) {
     return 1;
 }
 
-// FIX: NSData base64 decoder and remove [d release] for ARC
 static int l_crypt_base64decode(lua_State* L) {
     size_t len = 0;
     const char* s = luaL_checklstring(L, 1, &len);
