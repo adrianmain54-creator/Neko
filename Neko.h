@@ -13,7 +13,7 @@ extern "C" {
 void neko_register_api(lua_State* L);
 void neko_install_hooks(lua_State* L);
 
-// state handle — defined in Api.mm, called from your dylib entry
+// state handle — defined in Api.mm, called shit dylib entry
 lua_State* neko_get_state(void);
 void neko_set_state(lua_State* L);
 
