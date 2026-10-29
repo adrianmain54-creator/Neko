@@ -1,26 +1,28 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #include "Neko.h"
-#include <dlfcn.h>
 #include <string.h>
 #include <pthread.h>
 
-#define NEKO_GENV_KEY "neko.genv"
+#define NEKO_GENV_KEY    "neko.genv"
 #define NEKO_MAX_TRACKED 64
 
 // ─── state ────────────────────────────────────────────────────────────────
+static lua_State* g_injectedL = nullptr;
 static lua_State* g_mainL = nullptr;
 static lua_CFunction g_origNamecall = nullptr;
-static char g_namecallMethod[64] = {0};
+char g_namecallMethod[64] = {0};
 
-// tracked executor lua_States — any L in here is "ours"
+lua_State* neko_get_state(void) { return g_injectedL; }
+void neko_set_state(lua_State* L) { g_injectedL = L; }
+
 static lua_State* g_tracked[NEKO_MAX_TRACKED];
 static int g_trackedCount = 0;
 static pthread_mutex_t g_trackedMu = PTHREAD_MUTEX_INITIALIZER;
 
 static int is_tracked_state(lua_State* L) {
     if (!L) return 0;
-    if (L == g_mainL) return 0; // main state is the game's, never "ours" for namecall purposes
+    if (L == g_mainL) return 0;
     int found = 0;
     pthread_mutex_lock(&g_trackedMu);
     for (int i = 0; i < g_trackedCount; i++) if (g_tracked[i] == L) { found = 1; break; }
@@ -47,17 +49,6 @@ void neko_untrack_state(lua_State* L) {
     pthread_mutex_unlock(&g_trackedMu);
 }
 
-// ─── state accessor ───────────────────────────────────────────────────────
-// FILL: wire this against your real injected handle in Neko.h
-extern lua_State* neko_get_state(void) __attribute__((weak));
-
-lua_State* get_roblox_state(void) {
-    if (g_mainL) return g_mainL;
-    if (neko_get_state) g_mainL = neko_get_state();
-    if (!g_mainL) NSLog(@"[neko] FATAL: neko_get_state() unset — hook target missing");
-    return g_mainL;
-}
-
 // ─── hook ─────────────────────────────────────────────────────────────────
 static int neko_namecall_hook(lua_State* L);
 
@@ -72,31 +63,27 @@ static int passthrough(lua_State* L) {
     if (nargs < 0) { lua_pushnil(L); return 1; }
     lua_pushcfunction(L, g_origNamecall);
     lua_insert(L, 1);
-    // yieldable — game code can suspend inside
     lua_callk(L, nargs, LUA_MULTRET, 0, namecall_cont);
     return lua_gettop(L);
 }
 
 static int neko_namecall_hook(lua_State* L) {
-    // executor script calling into game: pass through untouched
     if (is_tracked_state(L)) return passthrough(L);
-
-    // game calling into itself: capture method, pass through
     const char* m = lua_namecallatom(L, nullptr);
     if (m) { strncpy(g_namecallMethod, m, 63); g_namecallMethod[63] = 0; }
-
     return passthrough(L);
 }
 
 void neko_install_hooks(lua_State* L) {
     if (!L) return;
+    if (!g_injectedL) g_injectedL = L;
+    if (!g_mainL)     g_mainL     = L;
+
     lua_getglobal(L, "game");
     if (!lua_getmetatable(L, -1)) { lua_pop(L, 1); return; }
 
     lua_getfield(L, -1, "__namecall");
-    if (lua_iscfunction(L, -1) && !g_origNamecall) {
-        g_origNamecall = lua_tocfunction(L, -1);
-    }
+    if (lua_iscfunction(L, -1) && !g_origNamecall) g_origNamecall = lua_tocfunction(L, -1);
     lua_pop(L, 1);
     if (!g_origNamecall) { lua_pop(L, 2); return; }
 
@@ -121,13 +108,8 @@ static int l_HttpGet(lua_State* L) {
         data = [d retain];
         dispatch_semaphore_signal(sem);
     }] resume];
-    // NOTE: blocking. run this from a coroutine on the script side if that matters.
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-    if (data) {
-        lua_pushlstring(L, (const char*)data.bytes, data.length);
-        [data release];
-        return 1;
-    }
+    if (data) { lua_pushlstring(L, (const char*)data.bytes, data.length); [data release]; return 1; }
     lua_pushnil(L); return 1;
 }
 
@@ -142,23 +124,19 @@ static int l_getgenv(lua_State* L) {
     return 1;
 }
 
-static int l_getreg(lua_State* L) {
-    lua_pushvalue(L, LUA_REGISTRYINDEX);
-    return 1;
-}
+static int l_getreg(lua_State* L) { lua_pushvalue(L, LUA_REGISTRYINDEX); return 1; }
 
 static int l_loadstring(lua_State* L) {
     size_t len = 0;
     const char* src = luaL_checklstring(L, 1, &len);
     if (luau_load(L, "=neko", src, len, 0) != 0) return lua_error(L);
-    // bind chunk env to genv so globals inside loaded chunk match the executor env
     lua_getfield(L, LUA_REGISTRYINDEX, NEKO_GENV_KEY);
     if (!lua_isnil(L, -1)) lua_setfenv(L, -2);
     else lua_pop(L, 1);
     return 1;
 }
 
-static int l_identify(lua_State* L)         { lua_pushliteral(L, "Neko/1.1"); return 1; }
+static int l_identify(lua_State* L)          { lua_pushliteral(L, "Neko/1.1"); return 1; }
 static int l_getnamecallmethod(lua_State* L) { if (g_namecallMethod[0]) lua_pushstring(L, g_namecallMethod); else lua_pushnil(L); return 1; }
 static int l_checkcaller(lua_State* L)       { lua_pushboolean(L, is_tracked_state(L)); return 1; }
 
@@ -218,11 +196,10 @@ void neko_register_api(lua_State* L) {
     lua_pushcfunction(L, l_setclipboard,      "toclipboard");       lua_setglobal(L, "toclipboard");
     lua_pushcfunction(L, l_getclipboard,      "getclipboard");      lua_setglobal(L, "getclipboard");
 
-    // also expose getgenv on the game metatable (some scripts expect it there)
     lua_getglobal(L, "game");
     if (lua_getmetatable(L, -1)) {
         lua_pushcfunction(L, l_HttpGet, "HttpGet");  lua_setfield(L, -2, "HttpGet");
-        lua_pushcfunction(L, l_HttpGet, "HttpGet");  lua_setfield(L, -2, "request");
+        lua_pushcfunction(L, l_HttpGet, "request");  lua_setfield(L, -2, "request");
         lua_pushcfunction(L, l_getgenv, "getgenv");  lua_setfield(L, -2, "getgenv");
         lua_pop(L, 1);
     }
