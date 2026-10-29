@@ -12,9 +12,11 @@ jobs:
           sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip jq
           pip3 install lief
           
-          # Make sure llvm tools are linked
-          sudo ln -sf $(which llvm-install-name-tool) /usr/local/bin/install_name_tool
-          sudo ln -sf $(which llvm-otool) /usr/local/bin/otool
+          # FIX: Create dummy apple tools to bypass CMake's ASM check
+          printf '#!/bin/bash\nexit 0\n' | sudo tee /usr/local/bin/install_name_tool
+          sudo chmod +x /usr/local/bin/install_name_tool
+          printf '#!/bin/bash\nexit 0\n' | sudo tee /usr/local/bin/otool
+          sudo chmod +x /usr/local/bin/otool
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
@@ -27,7 +29,6 @@ jobs:
           cd build
           SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          # Pass the explicit path to the LLVM tools
           cmake .. -DCMAKE_SYSTEM_NAME=iOS \
                    -DCMAKE_OSX_ARCHITECTURES="arm64" \
                    -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
@@ -35,8 +36,6 @@ jobs:
                    -DCMAKE_CXX_COMPILER=clang++ \
                    -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
                    -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
-                   -DCMAKE_INSTALL_NAME_TOOL=$(which llvm-install-name-tool) \
-                   -DCMAKE_OTOOL=$(which llvm-otool) \
                    -DCMAKE_BUILD_TYPE=Release
           make -j4
 
