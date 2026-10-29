@@ -112,7 +112,8 @@ jobs:
           binary.add_library('@executable_path/libswiftCore.dylib')
           binary.write(bin_path)
           new_bin = lief.parse(bin_path)
-          has_lib = any('libswiftCore.dylib' in lib for lib in new_bin.libraries)
+          # FIX: added .name to check the library name string
+          has_lib = any('libswiftCore.dylib' in lib.name for lib in new_bin.libraries)
           if not has_lib:
               raise Exception('FATAL: Injection failed!')
           "
