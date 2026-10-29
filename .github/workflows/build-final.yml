@@ -11,6 +11,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip jq
           pip3 install lief
+          
+          # FIX: Symlink Apple tool names to LLVM tools so CMake stops crying
+          sudo ln -sf /usr/bin/llvm-install-name-tool /usr/local/bin/install_name_tool
+          sudo ln -sf /usr/bin/llvm-otool /usr/local/bin/otool
 
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
