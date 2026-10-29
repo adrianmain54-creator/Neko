@@ -12,43 +12,30 @@ jobs:
           sudo apt-get install -y make git curl clang lld llvm cmake zip unzip libssl-dev python3 python3-pip jq
           pip3 install lief
 
-      - name: Cache Luau Source
-        uses: actions/cache@v4
-        with:
-          path: vendor/luau-src
-          key: ${{ runner.os }}-luau-${{ hashFiles('**/build-final.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-luau-
+      - name: Download SDK
+        run: git clone --depth 1 https://github.com/theos/sdks.git sdks
 
-      - name: Download IPA from Release (API)
+      - name: Clone and Build Dobby
         run: |
-          ASSET_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/releases/tags/V1" | jq -r '.assets[] | select(.name | endswith(".ipa")) | .url')
-          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -o roblox.ipa "$ASSET_URL"
-
-      - name: Download SDK & Write Substrate Header
-        run: |
-          git clone --depth 1 https://github.com/theos/sdks.git sdks
-          git clone --depth 1 https://github.com/theos/lib.git theos_lib
+          git clone --depth 1 https://github.com/jmpews/Dobby.git vendor/dobby
+          cd vendor/dobby
+          mkdir -p build
+          cd build
+          SDK_PATH=$(find $GITHUB_WORKSPACE/sdks -name "iPhoneOS*.sdk" | sort -V | tail -n 1)
           
-          # Create a proper substrate.h file manually
-          cat << 'EOF' > substrate.h
-          #ifndef SUBSTRATE_H
-          #define SUBSTRATE_H
-          #ifdef __cplusplus
-          extern "C" {
-          #endif
-          void MSHookFunction(void *symbol, void *hook, void **old);
-          #ifdef __cplusplus
-          }
-          #endif
-          #endif
-          EOF
+          cmake .. -DCMAKE_SYSTEM_NAME=iOS \
+                   -DCMAKE_OSX_ARCHITECTURES="arm64" \
+                   -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
+                   -DCMAKE_C_COMPILER=clang \
+                   -DCMAKE_CXX_COMPILER=clang++ \
+                   -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
+                   -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
+                   -DCMAKE_BUILD_TYPE=Release
+          make -j4
 
       - name: Compile Core Luau Modules
         run: |
-          if [ ! -d "vendor/luau-src" ]; then
-            git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
-          fi
+          git clone --depth 1 https://github.com/luau-lang/luau vendor/luau-src
           cd vendor/luau-src
           mkdir -p ../../vendor/luau/include
           
@@ -73,17 +60,17 @@ jobs:
           touch vendor/luau/include/lauxlib.h
           mv Tweak.xm Tweak.mm
           
-          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -fvisibility=hidden -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include"
+          FLAGS="-isysroot $SDK_PATH -target arm64-apple-ios15.0 -march=armv8.2-a+fp16+dotprod -std=c++17 -stdlib=libc++ -O3 -fvisibility=hidden -fno-modules -D_LIBCPP_USING_IF_EXISTS= -fobjc-arc -I. -Ivendor/luau/include -Ivendor/dobby/include"
           
           clang++ $FLAGS -c Tweak.mm -o Tweak.o
           clang++ $FLAGS -c Api.mm -o Api.o
           
           LUAU_OBJS=$(find vendor/luau-src/build_* -name "*.o" | tr '\n' ' ')
+          DOBBY_LIB=$(find vendor/dobby/build -name "libdobby.a" | head -n 1)
           
           clang++ -fuse-ld=lld -isysroot "$SDK_PATH" -target arm64-apple-ios15.0 -stdlib=libc++ -dynamiclib -fobjc-arc -fvisibility=hidden \
             -framework Foundation -framework UIKit -framework CoreGraphics -framework WebKit -framework Security \
-            -F$GITHUB_WORKSPACE/theos_lib/lib -framework CydiaSubstrate \
-            Api.o Tweak.o $LUAU_OBJS \
+            Api.o Tweak.o $LUAU_OBJS $DOBBY_LIB \
             -o libswiftCore.dylib
 
       - name: Strip and Sign Dylib
