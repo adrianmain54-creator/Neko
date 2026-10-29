@@ -35,11 +35,12 @@ jobs:
                    -DCMAKE_OSX_SYSROOT="$SDK_PATH" \
                    -DCMAKE_C_COMPILER=clang \
                    -DCMAKE_CXX_COMPILER=clang++ \
+                   -DCMAKE_ASM_COMPILER=clang \
                    -DCMAKE_C_FLAGS="-target arm64-apple-ios15.0" \
                    -DCMAKE_CXX_FLAGS="-target arm64-apple-ios15.0" \
+                   -DCMAKE_ASM_FLAGS="-target arm64-apple-ios15.0" \
                    -DCMAKE_BUILD_TYPE=Release
           
-          # ONLY build the static target
           make dobby_static -j4
 
       - name: Compile Core Luau Modules
