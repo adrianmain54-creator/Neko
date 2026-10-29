@@ -18,6 +18,11 @@ jobs:
           printf '#!/bin/bash\nexit 0\n' | sudo tee /usr/local/bin/otool
           sudo chmod +x /usr/local/bin/otool
 
+      - name: Download IPA from Release (API)
+        run: |
+          ASSET_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/releases/tags/V1" | jq -r '.assets[] | select(.name | endswith(".ipa")) | .url')
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -o roblox.ipa "$ASSET_URL"
+
       - name: Download SDK
         run: git clone --depth 1 https://github.com/theos/sdks.git sdks
 
