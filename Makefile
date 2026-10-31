@@ -1,11 +1,13 @@
-ARCHS = arm64 arm64e
-TARGET = iphone:clang:latest:15.0
-INSTALL_TARGET_PROCESSES = Roblox
+TARGET := iphone:clang:latest:14.0
+ARCHS  := arm64 arm64e
+INSTALL_TARGET_PROCESSES := RobloxPlayer
+
 include $(THEOS)/makefiles/common.mk
-TWEAK_NAME = neko
-neko_FILES = Tweak.xm Api.mm
-neko_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/vendor/luau/include -I$(THEOS_PROJECT_DIR)/vendor/luau/include/Luau
-neko_FRAMEWORKS = Foundation UIKit UniformTypeIdentifiers
-neko_LIBRARIES = substrate
-neko_LDFLAGS = -L$(THEOS_PROJECT_DIR)/vendor/luau/lib -lLuau.VM -lLuau.Compiler
+
+TWEAK_NAME := neko
+neko_FILES := Tweak.mm Api.mm
+neko_FRAMEWORKS := Foundation UIKit WebKit UniformTypeIdentifiers
+neko_CFLAGS := -fobjc-arc -std=c++17 -Wno-deprecated-declarations
+neko_LIBRARIES := substrate
+
 include $(THEOS_MAKE_PATH)/tweak.mk
