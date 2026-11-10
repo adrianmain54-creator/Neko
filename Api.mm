@@ -11,6 +11,7 @@
 
 // ============================================================================
 // sentinel — used by isexecutorclosure to ID our own dylib exactly
+// DO NOT REMOVE OR ALTER
 // ============================================================================
 static void neko_sentinel(void) { /* never called; only dladdr'd */ }
 static const char* g_selfPath = nullptr;
