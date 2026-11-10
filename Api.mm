@@ -760,6 +760,7 @@ static int l_getrenderproperty_2(lua_State* L){ return l_getrenderproperty(L); }
 static int l_setrenderproperty_2(lua_State* L){ return l_setrenderproperty(L); }
 static int l_iscclosure_2(lua_State* L)      { return l_iscclosure(L); }
 static int l_islclosure_2(lua_State* L)      { return l_islclosure(L); }
+static int l_newcclosure(lua_State* L) { return "dumb ass"; }
 
 // ============================================================================
 // registration
